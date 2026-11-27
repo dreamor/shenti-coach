@@ -1,0 +1,22 @@
+{
+  "title": "示例 · 对数函数定义域 · 审题大爆炸展开图",
+  "mode": "explain",
+  "subtitle": "f(x)=lg(x²−2x−3) ｜ 数学·函数（人教A版必修一）｜ 连线：触发词·相关度",
+  "nodes": [
+    {"id": "ROOT", "text": "求 f(x)=lg(x²−2x−3)<br/>的定义域", "cls": "root"},
+    {"id": "C1", "text": "C1 已知函数<br/>f(x)=lg(x²−2x−3)", "cls": "cond"},
+    {"id": "H1", "text": "H1 真数必须大于 0<br/>x²−2x−3>0", "cls": "core"},
+    {"id": "K1", "text": "K1 对数函数定义域<br/>真数>0", "cls": "core"},
+    {"id": "K2", "text": "K2 一元二次不等式<br/>因式分解求区间", "cls": "core"},
+    {"id": "B1", "text": "B1 待填：定义域<br/>（写成区间）", "cls": "core"},
+    {"id": "D1", "text": "D1 值域、单调性<br/>本题用不上", "cls": "disturb"}
+  ],
+  "edges": [
+    {"from": "ROOT", "to": "C1", "label": "题干·核心"},
+    {"from": "C1", "to": "H1", "label": "lg·核心"},
+    {"from": "H1", "to": "K1", "label": "真数>0·核心"},
+    {"from": "H1", "to": "K2", "label": "二次式·核心"},
+    {"from": "H1", "to": "B1", "label": "作答·核心"},
+    {"from": "ROOT", "to": "D1", "label": "干扰", "dashed": true}
+  ]
+}
