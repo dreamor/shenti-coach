@@ -8,6 +8,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+if (typeof WebSocket === 'undefined') {
+  console.error(`截图需要 Node.js ≥ 22（内置 WebSocket）。当前版本：${process.versions.node}`);
+  process.exit(5);
+}
+
 const CHROME_CANDIDATES = [
   process.env.CHROME_PATH,
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',

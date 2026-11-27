@@ -79,7 +79,7 @@ git clone https://github.com/dreamor/shenti-coach.git ~/.claude/skills/shenti-co
 
 ## 依赖
 
-- **Node.js ≥ 18**：运行校验与生图脚本。
+- **Node.js ≥ 22**：运行校验与生图脚本；截图链路依赖 Node 内置的 WebSocket。
 - **Chrome / Chromium / Edge**：把 HTML 截图成 PNG；可用 `CHROME_PATH` 指定浏览器路径。
 - **无第三方 npm 依赖**：Mermaid 已内置于 `scripts/vendor/mermaid.min.js`，离线可用。
 - macOS 可选：`swift scripts/ocr.swift <PNG>` 用于图片文字查漏。
@@ -173,6 +173,7 @@ node scripts/render_bigbang.mjs spec.json bigbang.png \
 | 2 | 规格 / 公式 / 答案指纹校验失败 |
 | 3 | Mermaid 渲染失败或超时 |
 | 4 | 未找到 Chrome，可用 `CHROME_PATH` 指定 |
+| 5 | Node.js < 22，缺少内置 WebSocket |
 
 重新生成示例图：
 

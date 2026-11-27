@@ -10,7 +10,7 @@
    node <shenti-coach目录>/scripts/render_bigbang.mjs "<spec.json>" "<PNG绝对路径>" --width 1600 --scale 2
    ```
 
-   脚本会自动生成同名 `.html` 便于复查。**只有输出 JSON 中 `ok:true` 且 `status:"ok"` 才算成功**。退出码：2 = 规格/公式/答案指纹校验失败（按报错改成 Unicode 纯文本或角度提示），3 = Mermaid 渲染失败或超时（必须修图，不能把带 Syntax error 的图当成功），4 = 未找到 Chrome（可设 `CHROME_PATH` 环境变量）。脚本默认使用技能自带的 `scripts/vendor/mermaid.min.js`，离线可用；需要换源时设 `SHENTI_MERMAID_SRC=<url或file://路径>`。交付前可用 `--forbid "答案指纹"`（可重复）检查**标题、副标题、脚注、节点、连线**是否泄露答案；任一处命中都会以退出码 2 拒绝渲染。`build_bigbang.mjs` 直接调用时也支持同样的 `--forbid`。
+   脚本会自动生成同名 `.html` 便于复查。**只有输出 JSON 中 `ok:true` 且 `status:"ok"` 才算成功**。退出码：2 = 规格/公式/答案指纹校验失败（按报错改成 Unicode 纯文本或角度提示），3 = Mermaid 渲染失败或超时（必须修图，不能把带 Syntax error 的图当成功），4 = 未找到 Chrome（可设 `CHROME_PATH` 环境变量），5 = Node.js < 22（截图依赖 Node 内置 WebSocket）。脚本默认使用技能自带的 `scripts/vendor/mermaid.min.js`，离线可用；需要换源时设 `SHENTI_MERMAID_SRC=<url或file://路径>`。交付前可用 `--forbid "答案指纹"`（可重复）检查**标题、副标题、脚注、节点、连线**是否泄露答案；任一处命中都会以退出码 2 拒绝渲染。`build_bigbang.mjs` 直接调用时也支持同样的 `--forbid`。
 3. 没有 Node/Chrome：`npx -y @mermaid-js/mermaid-cli -i in.mmd -o out.png`；仍失败则交付 Mermaid 源码 + 文本树，并说明图片生成失败的原因。
 4. 若本机确实安装了 `data-visualization`，且其当前 SKILL.md 明确提供 validate/screenshot 接口，可作为备选：读取其 reference/mermaid-guide.md、reference/output-and-validation.md，用其 validate.js + screenshot.js。
 5. 离线环境：默认已走本机 `scripts/vendor/mermaid.min.js`，无需联网；该文件缺失时才按第 3 条降级。

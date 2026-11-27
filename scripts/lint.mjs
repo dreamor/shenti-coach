@@ -79,8 +79,11 @@ if (pkg) {
   check(pkg.name === 'shenti-coach', 'package.json name', pkg.name);
   check(/^\d+\.\d+\.\d+$/.test(pkg.version ?? ''), 'package.json version 为语义化版本', pkg.version);
   check(pkg.license === 'MIT', 'package.json license', pkg.license);
-  check(pkg.engines?.node === '>=18', 'Node 版本要求', pkg.engines?.node);
+  check(pkg.engines?.node === '>=22', 'Node 版本要求', pkg.engines?.node);
 }
+
+const nodeMajor = Number(process.versions.node.split('.')[0]);
+check(nodeMajor >= 22 && typeof WebSocket !== 'undefined', '运行环境满足 Node.js ≥ 22 + WebSocket', process.versions.node);
 
 // 3. SKILL.md frontmatter
 const skill = await read('SKILL.md');

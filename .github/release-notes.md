@@ -35,7 +35,7 @@ shasum -a 256 -c skill.zip.sha256
 
 ### 依赖
 
-- Node.js ≥ 18
+- Node.js ≥ 22（截图链路依赖 Node 内置 WebSocket）
 - Chrome / Chromium / Edge（生成 PNG 时需要；可用 `CHROME_PATH` 指定）
 
 完整说明见仓库 [README](https://github.com/dreamor/shenti-coach#readme)。
