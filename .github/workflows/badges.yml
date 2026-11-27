@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: update-release-badge
+  cancel-in-progress: false
+
 jobs:
   release-badge:
     name: Regenerate release badge
@@ -39,5 +43,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add assets/badges/release.svg
-          git commit -m "chore: update release badge"
-          git push || echo "::warning::could not push badge update (check branch protection)"
+          git commit -m "chore: update release badge" -m "Co-Authored-By: Claude Code <noreply@anthropic.com>"
+          # No force push and no silent success on branch protection/races.
+          if ! git push; then
+            echo "::error::could not push badge update (check branch protection or concurrent main updates)" >&2
+            exit 1
+          fi

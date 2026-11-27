@@ -5,6 +5,9 @@
 //        [--require-blank-map] [--strict-answer] [--solution] [--semantic-reviewed] [--strict-semantic] [--json]
 
 import { readFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
+import { validateTraining } from './training_state.mjs';
+import { validateDeliveryManifest } from './lib/delivery.mjs';
 
 const [, , file, ...rest] = process.argv;
 if (!file || file.startsWith('--')) {
@@ -16,7 +19,7 @@ const argumentError = (message) => {
   console.error(message);
   process.exit(2);
 };
-const valueFlags = new Set(['--mode', '--type', '--blanks', '--answer-slots', '--q-count', '--answer']);
+const valueFlags = new Set(['--mode', '--type', '--blanks', '--answer-slots', '--q-count', '--answer', '--training-state', '--student', '--question', '--delivery', '--delivery-manifest', '--presentation']);
 const booleanFlags = new Set(['--require-media', '--require-blank-map', '--strict-answer', '--solution', '--semantic-reviewed', '--strict-semantic', '--json']);
 const values = new Map();
 const flags = new Set();
@@ -58,7 +61,52 @@ const semanticReviewed = hasFlag('--semantic-reviewed');
 const strictSemantic = hasFlag('--strict-semantic');
 const jsonMode = hasFlag('--json');
 if (strictAnswer && !answerTerms.length) argumentError('--strict-answer 必须提供至少一个非空 --answer 答案指纹');
+const readControlJson = async (filename, label) => {
+  try {
+    const raw = await readFile(filename, 'utf8');
+    if (raw.length > 1_000_000) throw new Error('too large');
+    return JSON.parse(raw);
+  } catch {
+    argumentError(`${label} 必须是可读取、大小合规的 JSON 文件`);
+  }
+};
+const delivery = getFlag('--delivery', 'media');
+if (!['media', 'markdown', 'file'].includes(delivery)) argumentError('--delivery 只能是 media、markdown 或 file');
+const manifestPath = getFlag('--delivery-manifest', null);
+if (delivery !== 'media' && !manifestPath) argumentError('非 MEDIA 交付必须提供 --delivery-manifest');
+let deliveryManifest = null;
+if (manifestPath) {
+  deliveryManifest = await readControlJson(manifestPath, '交付清单');
+  try { validateDeliveryManifest(deliveryManifest); } catch { argumentError('交付清单无效或图片不存在'); }
+  if (deliveryManifest.mode !== delivery) argumentError('交付清单模式与 --delivery 不一致');
+}
+const trainingStatePath = getFlag('--training-state', null);
+let trainingState = null;
+if (trainingStatePath) {
+  if (mode !== 'training') argumentError('--training-state 仅用于 training 模式的当前轮次校验');
+  if (requireMedia && !manifestPath) argumentError('自适应训练强制图片时需提供 --delivery-manifest 验证实际产物');
+  const raw = await readControlJson(trainingStatePath, '训练状态');
+  trainingState = raw.state ?? raw;
+  try { validateTraining(trainingState); } catch { argumentError('训练状态无效，必须来自可重放的状态机'); }
+  if (!getFlag('--student', null) || !getFlag('--question', null)) argumentError('自适应训练需明确 --student 与 --question');
+  if (trainingState.student_id !== getFlag('--student', null) || trainingState.question_id !== getFlag('--question', null)) {
+    argumentError('训练状态与当前学生/题次不匹配');
+  }
+}
 const text = await readFile(file, 'utf8');
+const presentationPath = getFlag('--presentation', null);
+let presentationText = null;
+if (presentationPath) {
+  if (mode === 'training') argumentError('学生展示与完整审计配对时使用 explain；训练当前轮次单独校验');
+  try { presentationText = await readFile(presentationPath, 'utf8'); } catch { argumentError('学生展示文件不可读取'); }
+  if (presentationText.length > 1_000_000) argumentError('学生展示文件过大');
+}
+const hasDeliveryReference = (part) => {
+  if (!deliveryManifest) return /^MEDIA:\S+/m.test(part);
+  if (deliveryManifest.status === 'unavailable' || !deliveryManifest.path || !deliveryManifest.reference) return false;
+  return part.includes(deliveryManifest.reference) || part.includes(deliveryManifest.path)
+    || part.includes(pathToFileURL(deliveryManifest.path).href);
+};
 const fail = [];
 const warn = [];
 const ok = [];
@@ -83,12 +131,13 @@ if (strictSemantic && !semanticReviewed) {
   add('语义人工复核', false, '使用 --strict-semantic 时必须同时声明 --semantic-reviewed；自动闸门不能证明条件语义正确');
 }
 
-const solutionBoundaries = [...text.matchAll(/^[ \t]*(?:#+[ \t]*)?(?:(完整解答|完整解析|解题过程|解答)\s*$|〇[、.．])/gm)];
+const getSolutionBoundaries = (source) => [...source.matchAll(/^[ \t]*(?:#+[ \t]*)?(?:(完整解答|完整解析|解题过程|解答)\s*$|〇[、.．])/gm)];
+const solutionBoundaries = getSolutionBoundaries(text);
 const fullSolutionAt = solutionBoundaries.find((m) => m[1])?.index ?? -1;
-const isAfterFullSolution = (index) => {
+const isAfterFullSolution = (index, boundaries = solutionBoundaries) => {
   if (mode !== 'explain' || !solutionMode) return false;
   let inSolution = false;
-  for (const boundary of solutionBoundaries) {
+  for (const boundary of boundaries) {
     if (boundary.index > index) break;
     inSolution = Boolean(boundary[1]);
   }
@@ -121,21 +170,52 @@ const isPartialNumberOccurrence = (s, idx, term) => {
     || (!/^[+-]/.test(term) && /[-−]/.test(before));
 };
 
-const findAnswerLeaks = (terms) => {
-  const leaks = [];
-  if (!terms.length) return leaks;
-  // 教材元数据只遮蔽到字段分隔符，不能连带遮蔽同格中的知识内容或答案。
-  // 图片只遮蔽地址，保留替代文字和同行说明；等长空格保持原始行号与上下文。
-  const scanText = text
+const maskAddresses = (source) => {
+  let masked = source
     .replace(/(?:课标要求|教材)[:：][^\n|；;]*/g, (m) => ' '.repeat(m.length))
     .replace(/^\s*MEDIA:\S+/gm, (m) => ' '.repeat(m.length))
     .replace(/(!\[[^\]\n]*\]\()([^\)\n]*)(\))/g, (_, start, url, end) => start + ' '.repeat(url.length) + end);
-  const headings = [...text.matchAll(/^[ \t]*(?:#+[ \t]*)?([〇一二三四五六七])[、.．]/gm)].map((m) => ({
-    section: m[1],
-    index: m.index,
-  }));
+  if (deliveryManifest?.mode === 'file' && deliveryManifest.path) {
+    for (const address of [deliveryManifest.path, pathToFileURL(deliveryManifest.path).href]) {
+      masked = masked.split(address).join(' '.repeat(address.length));
+    }
+  }
+  return masked;
+};
+const balancedMath = (source) => {
+  let fence = null;
+  const prose = [];
+  for (const line of maskAddresses(source).split('\n')) {
+    const code = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (code) {
+      if (!fence) fence = code[1];
+      else if (code[1][0] === fence[0] && code[1].length >= fence.length) fence = null;
+    } else if (!fence) prose.push(line);
+  }
+  const value = prose.join('\n').replace(/`+[^`]*`+/g, '');
+  let delimiter = null;
+  for (let i = 0; i < value.length; i++) {
+    if (value[i] !== '$') continue;
+    let slashes = 0;
+    for (let j = i - 1; j >= 0 && value[j] === '\\'; j--) slashes++;
+    if (slashes % 2) continue;
+    const token = value[i + 1] === '$' ? '$$' : '$';
+    if (token === '$$') i++;
+    if (delimiter === null) delimiter = token;
+    else if (delimiter === token) delimiter = null;
+    else return false;
+  }
+  return delimiter === null;
+};
+const findAnswerLeaks = (terms, source = text) => {
+  const leaks = [];
+  if (!terms.length) return leaks;
+  // 仅遮蔽已验证地址及独立元数据，保留路径外的教学正文和答案。
+  const scanText = maskAddresses(source);
+  const boundaries = getSolutionBoundaries(source);
+  const headings = [...source.matchAll(/^[ \t]*(?:#+[ \t]*)?([〇一二三四五六七])[、.．]/gm)].map((m) => ({ section: m[1], index: m.index }));
   const sectionAt = (index) => {
-    if (isAfterFullSolution(index)) return '完整解答';
+    if (isAfterFullSolution(index, boundaries)) return '完整解答';
     let current = '?';
     for (const h of headings) {
       if (h.index <= index) current = h.section;
@@ -149,23 +229,73 @@ const findAnswerLeaks = (terms) => {
     while (from < scanText.length) {
       const idx = scanText.indexOf(term, from);
       if (idx < 0) break;
-      const lineStart = text.lastIndexOf('\n', idx) + 1;
-      const lineEnd = text.indexOf('\n', idx);
-      const lineText = text.slice(lineStart, lineEnd < 0 ? text.length : lineEnd);
+      const lineStart = source.lastIndexOf('\n', idx) + 1;
+      const lineEnd = source.indexOf('\n', idx);
+      const lineText = source.slice(lineStart, lineEnd < 0 ? source.length : lineEnd);
       if (isPartialNumberOccurrence(scanText, idx, term) || isStructuralIdOccurrence(scanText, idx, term)) { from = idx + term.length; continue; }
-      const line = text.slice(0, idx).split(/\n/).length;
+      const line = source.slice(0, idx).split(/\n/).length;
       const section = sectionAt(idx);
-      const context = lineText.trim().slice(0, 120) || '';
-      if (section !== '完整解答') {
-        leaks.push({ term, line, section, context });
-      }
+      if (section !== '完整解答') leaks.push({ term, line, section, context: lineText.trim().slice(0, 120) });
       from = idx + term.length;
     }
   }
   return leaks;
 };
 
-// 训练模式：只走四步流程检查，不要求八模块 / B 卡。
+if (presentationText !== null) {
+  const isFullDump = ['〇', '一', '二', '三', '四', '五', '六', '七']
+    .every((m) => new RegExp(`(?:^|\\n)\\s*(?:#+\\s*)?${m}[、.]`).test(presentationText));
+  add('学生展示保留核心导航', /速览/.test(presentationText) && /条件/.test(presentationText)
+    && /路径/.test(presentationText) && /迁移|审题收获/.test(presentationText) && !isFullDump,
+    '学生页需要速览、核心条件、路径和迁移，不能再粘贴完整八模块');
+  add('学生页公式定界完整', balancedMath(presentationText), '数学块必须整体保留，不能截断 $ 或 $$ 定界符');
+  const leaks = findAnswerLeaks(answerTerms, presentationText);
+  add('学生展示答案隔离', leaks.length === 0, leaks.length ? `学生页出现 ${leaks.length} 处答案指纹` : '未发现答案指纹');
+  if (deliveryManifest?.status !== 'unavailable' && deliveryManifest) {
+    add('学生页引用实际图', hasDeliveryReference(presentationText), '学生页未引用清单中的真实图');
+  }
+  if (deliveryManifest?.status === 'unavailable') warn.push('WARN 图不可用，学生页仅文字降级，未宣称已交付');
+}
+
+// 自适应训练只检查当前回复；完整审计仍单独走八模块闸门。
+if (mode === 'training' && trainingState) {
+  const phase = trainingState.phase;
+  if (requireMedia) add('当前轮次强制图片', phase === 'reveal' && hasDeliveryReference(text), '只有 reveal 阶段且实际图片被引用才能通过强制图片检查');
+  const attachments = /MEDIA:|!\[|\[[^\]]*\]\([^\n)]*(?:\.(?:png|jpe?g|webp)|audit\.md)[^\n)]*\)|\baudit\.md\b/i.test(text)
+    || (deliveryManifest && hasDeliveryReference(text));
+  const revealContent = /隐含条件表|路径提示|收敛[·\s]*路径|(?:^|\n)\s*\|?\s*H\d+\s*(?:\||[:：])/.test(text);
+  if (phase !== 'reveal') {
+    add('当前阶段不提前揭示或附审计', !attachments && !revealContent,
+      '仅 reveal 阶段允许隐含条件、完整路径、图和审计附件');
+  } else {
+    add('揭示包含具体隐含条件', /H\d+/.test(text), '揭示回复需要 H 编号');
+    if (deliveryManifest && deliveryManifest.status !== 'unavailable') {
+      add('揭示引用实际图文件', hasDeliveryReference(text), '正文未引用交付清单中的真实图');
+    }
+  }
+  const hintLines = text.split('\n').filter((line) => /^\s*>/.test(line));
+  if (phase === 'hint' || phase === 'attempt') {
+    const questionMarks = (hintLines.join('').match(/[？?]/g) || []).length;
+    add('每轮最多一条提示', hintLines.length <= 1 && questionMarks <= 1,
+      '当前回复不能给多行或多个问题的触发词提示');
+    if (phase === 'hint') add('提示阶段有一条提示', hintLines.length === 1, '提示阶段需一行 > 提示');
+  }
+  if (phase === 'transfer') {
+    add('迁移检查不提供提示', hintLines.length === 0 && !/提示[:：]|本轮只给|请再想一轮/.test(text), '迁移题使用普通文本，不提供引用提示或触发词提示');
+  }
+  if (phase === 'complete') add('掌握经过无提示迁移', trainingState.transfer_passed === true, '不能把揭示后看懂视为掌握');
+  const leaks = findAnswerLeaks(answerTerms);
+  add('训练模式不泄答案', leaks.length === 0, leaks.length ? `发现 ${leaks.length} 处答案指纹` : '未发现答案指纹');
+  if (!answerTerms.length) warn.push('WARN 未提供答案指纹，语义与答案隔离仍待人工复核');
+  if (deliveryManifest?.status === 'unavailable') warn.push('WARN 图不可用，只能文字降级，未宣称图片已交付');
+  const result = { file, mode, protocol: 'adaptive', phase, answerTerms, answerLeaks: leaks, fail, warn, ok,
+    structurePass: fail.length === 0, semanticReview: semanticReviewed ? 'done' : 'pending', pass: fail.length === 0 };
+  if (jsonMode) console.log(JSON.stringify(result, null, 2));
+  else console.log([...ok, ...warn, ...fail].join('\n'));
+  process.exit(result.pass ? 0 : 1);
+}
+
+// 旧四步汇总记录继续兼容，不要求每次回复含四步。
 if (mode === 'training') {
   const stepPos = (n) => {
     const m = text.match(new RegExp(`(?:^|\\n)\\s*(?:#+\\s*)?(?:\\*\\*)?\\s*第\\s*${n}\\s*步`));
@@ -181,7 +311,8 @@ if (mode === 'training') {
 
   const beforeStep3 = p3 >= 0 ? text.slice(0, p3) : text;
   const preMedia = [...beforeStep3.matchAll(/^MEDIA:\S+/gm)].length
-    + [...beforeStep3.matchAll(/!\[[^\]]*\]\([^)]*\.(?:png|jpe?g|webp)\)/gi)].length;
+    + [...beforeStep3.matchAll(/!\[[^\]]*\]\([^)]*\.(?:png|jpe?g|webp)\)/gi)].length
+    + (deliveryManifest && hasDeliveryReference(beforeStep3) ? 1 : 0);
   add('第1/2步不出图', preMedia === 0,
     `第3步前出现 ${preMedia} 处图片交付/引用；训练模式只在第3步揭示后出图`);
 
@@ -210,8 +341,8 @@ if (mode === 'training') {
 
   const step3 = p3 >= 0 ? text.slice(p3, p4 > p3 ? p4 : text.length) : '';
   add('第3步揭示隐含条件', /H\d+/.test(step3), '第3步未发现 H 编号隐含条件');
-  add('第3步出图', [...step3.matchAll(/^MEDIA:\S+/gm)].length >= 1,
-    '第3步未发现 MEDIA 图片交付；揭示后才允许出图');
+  add('第3步出图', hasDeliveryReference(step3),
+    '第3步未发现匹配的图片引用；非 MEDIA 模式需要有效交付清单');
 
   const step4 = p4 >= 0 ? text.slice(p4) : '';
   const ledgerOk = /盲区账本/.test(step4) && /条件类型/.test(step4) && /累计次数/.test(step4);
@@ -422,7 +553,9 @@ if (type === 'calculation' || type === 'solution' || type === 'mixed') {
 // 4. 图形与媒体
 const mediaLines = [...text.matchAll(/^MEDIA:(\S+)/gm)];
 if (requireMedia) {
-  add('MEDIA 图片交付', mediaLines.length >= 1, '未发现 MEDIA 行；每题至少一张大爆炸图');
+  add(delivery === 'media' ? 'MEDIA 图片交付' : '图片文件引用',
+    deliveryManifest ? hasDeliveryReference(presentationText ?? text) : mediaLines.length >= 1,
+    '未发现与交付模式匹配的真实图引用');
   const nonAbs = mediaLines.filter((m) => !m[1].startsWith('/'));
   if (nonAbs.length) warn.push(`WARN MEDIA 路径不是绝对路径：${nonAbs[0][1]}`);
 }
