@@ -146,7 +146,9 @@ node scripts/check_output.mjs output.md \
   --answer "答案指纹"
 ```
 
-严格模式会额外拦截答案泄露：
+严格模式会额外拦截答案泄露，必须同时提供至少一个非空 `--answer` 指纹。计数参数必须是非负安全整数；缺值或非法参数以退出码 2 拒绝，不会显示 PASS。数字指纹不会命中 `C1`、`H1` 等编号或其他数值内部；仍需人工检查同义改写与语义泄题。
+
+解题模式使用 `--solution` 时，只有独立“完整解答”标题之后允许答案，前置八模块与配图仍须隔离答案；训练模式不接受完整解答区豁免。
 
 ```bash
 node scripts/check_output.mjs output.md --strict-answer --answer "答案指纹" ...
@@ -187,13 +189,14 @@ npm run demo:render
 
 ```bash
 npm run lint      # 元数据、JSON、JS 语法、绝对路径、示例规格、结构闸门
-npm run package   # 生成 dist/skill.zip 与 dist/skill.zip.sha256
-npm run verify    # lint + package
+npm test          # lint + Node 原生行为回归（答案隔离、输入保真、预检与模式边界）
+npm run package   # 生成 dist/skill.zip 与 dist/skill.zip.sha256；需 zip / unzip
+npm run verify    # test + package
 ```
 
 GitHub Actions：
 
-- **CI**（`.github/workflows/ci.yml`）：在 push / PR 时运行 `npm run lint`，并实际渲染示例 PNG 验证生图链路。
+- **CI**（`.github/workflows/ci.yml`）：在 push / PR 时运行 `npm test`，实际渲染示例 PNG，并打包、校验 SHA-256、从解压包运行行为回归；示例渲染的中间产物仅写入 `dist/`。
 - **Release**（`.github/workflows/release.yml`）：推送 `v*` 标签后先复用 CI，再校验标签与 `package.json` 版本一致，构建 `skill.zip`，创建 GitHub Release 并上传附件。
 
 发布新版本：

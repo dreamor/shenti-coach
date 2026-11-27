@@ -40,6 +40,16 @@ export function validateSpec(spec, options = {}) {
   const warnings = [];
   const errors = [];
   const forbidTerms = (options.forbidTerms ?? []).filter(Boolean);
+  const checkAnswerIsolation = (value, where) => {
+    const raw = String(value ?? '');
+    const rendered = normalizeMathText(raw);
+    for (const [re, label] of LEAK_PATTERNS) {
+      if (re.test(rendered)) warnings.push(`${where} ${label}，审题配图不应出现最终结论`);
+    }
+    for (const term of forbidTerms) {
+      if (raw.includes(term) || rendered.includes(normalizeMathText(term))) errors.push(`${where} 命中答案指纹“${term}”；请改写为条件/角度/判据`);
+    }
+  };
   if (!spec || typeof spec !== 'object') {
     throw new Error('规格必须是 JSON 对象');
   }
@@ -58,12 +68,7 @@ export function validateSpec(spec, options = {}) {
   for (const field of ['title', 'subtitle', 'footnote']) {
     const value = String(spec[field] ?? '');
     if (!value) continue;
-    for (const [re, label] of LEAK_PATTERNS) {
-      if (re.test(value)) warnings.push(`${field} ${label}，审题配图不应出现最终结论`);
-    }
-    for (const term of forbidTerms) {
-      if (value.includes(term)) errors.push(`${field} 命中答案指纹“${term}”；讲解模式配图不得写答案，请改写为角度/判据`);
-    }
+    checkAnswerIsolation(value, field);
   }
 
   const ids = new Set();
@@ -78,12 +83,7 @@ export function validateSpec(spec, options = {}) {
     for (const line of lines) {
       if (line.length > 30) warnings.push(`节点 ${n.id} 有一行超过 30 字，可能挤压图面：${line.slice(0, 24)}…`);
     }
-    for (const [re, label] of LEAK_PATTERNS) {
-      if (re.test(String(n.text ?? ''))) warnings.push(`节点 ${n.id} ${label}，审题配图不应出现最终结论`);
-    }
-    for (const term of forbidTerms) {
-      if (String(n.text ?? '').includes(term)) errors.push(`节点 ${n.id} 命中答案指纹“${term}”；讲解模式配图不得写答案，请改写为角度/判据`);
-    }
+    checkAnswerIsolation(n.text, `节点 ${n.id}`);
     ids.add(n.id);
   }
   if (!ids.has('ROOT')) warnings.push('建议保留 id=ROOT 的题目节点，便于读图');
@@ -101,7 +101,9 @@ export function validateSpec(spec, options = {}) {
     groupIds.add(gid);
     const list = Array.isArray(g.nodes) ? g.nodes : [];
     if (!list.length) errors.push(`分组 ${gid} 没有 nodes`);
+    const label = String(g.label ?? gid);
     if (!String(g.label ?? '').trim()) warnings.push(`分组 ${gid} 缺少 label，学生看不出这一组对应哪一问`);
+    checkAnswerIsolation(label, `分组 ${gid}`);
     for (const nid of list) {
       if (!ids.has(nid)) { errors.push(`分组 ${gid} 引用了不存在的节点: ${nid}`); continue; }
       if (nid === 'ROOT') { errors.push(`分组 ${gid} 不能包含 ROOT`); continue; }
@@ -120,12 +122,7 @@ export function validateSpec(spec, options = {}) {
     if (!e || typeof e !== 'object') { errors.push('连线必须是对象'); continue; }
     if (!ids.has(e.from) || !ids.has(e.to)) errors.push(`连线引用了不存在的节点: ${e.from} -> ${e.to}`);
     if (!String(e.label ?? '').trim()) warnings.push(`连线 ${e.from} -> ${e.to} 没有触发词/相关度标签`);
-    for (const [re, label] of LEAK_PATTERNS) {
-      if (re.test(String(e.label ?? ''))) warnings.push(`连线 ${e.from} -> ${e.to} ${label}，审题配图不应出现最终结论`);
-    }
-    for (const term of forbidTerms) {
-      if (String(e.label ?? '').includes(term)) errors.push(`连线 ${e.from} -> ${e.to} 命中答案指纹“${term}”；请改写为触发词/相关度`);
-    }
+    checkAnswerIsolation(e.label, `连线 ${e.from} -> ${e.to}`);
     const key = `${e.from}\u0000${e.to}\u0000${e.label ?? ''}\u0000${e.dashed ? 1 : 0}`;
     if (edgeKeys.has(key)) warnings.push(`重复连线: ${e.from} -> ${e.to}（${e.label ?? ''}）`);
     edgeKeys.add(key);

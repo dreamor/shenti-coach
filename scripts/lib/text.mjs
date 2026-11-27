@@ -250,9 +250,13 @@ function convertScripts(text) {
       let next;
       if (text[i + 1] === '{') [content, next] = readGroup(text, i + 1);
       else { content = text[i + 1] ?? ''; next = i + 2; }
-      let converted = '';
-      for (const c of replaceCommands(content)) converted += map[c] ?? c;
-      out += converted;
+      const normalized = replaceCommands(content);
+      // 必须整组可映射才去掉定界；部分映射会把指数/下标误写成正文。
+      // 否则保留显式分组，重复 normalizeMathText 仍得到同一回退文本。
+      const chars = [...normalized];
+      out += chars.length && chars.every((c) => map[c] !== undefined)
+        ? chars.map((c) => map[c]).join('')
+        : `${ch}{${normalized}}`;
       i = next;
       continue;
     }
