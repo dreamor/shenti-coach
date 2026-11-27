@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint and smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Show tool versions
+        run: |
+          node --version
+          npm --version
+          google-chrome --version || true
+
+      - name: Lint skill
+        run: npm run lint
+
+      - name: Render demo big-bang image
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+        run: |
+          mkdir -p dist
+          node scripts/render_bigbang.mjs examples/demo-spec.json dist/demo-bigbang.png --width 1600 --scale 2
+
+      - name: Verify rendered image
+        run: |
+          test -s dist/demo-bigbang.png
+          file dist/demo-bigbang.png
+
+      - name: Upload demo image
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-bigbang
+          path: dist/demo-bigbang.png
+          if-no-files-found: error

@@ -4,6 +4,10 @@
 
 遵循 [Agent Skills 规范](https://agentskills.io/specification)，可直接用于 Codex、Claude Code 及其他兼容 Agent Skills 的客户端。
 
+[![CI](https://github.com/dreamor/shenti-coach/actions/workflows/ci.yml/badge.svg)](https://github.com/dreamor/shenti-coach/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/dreamor/shenti-coach)](https://github.com/dreamor/shenti-coach/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 ![审题大爆炸展开图示例](examples/demo-bigbang.png)
 
 ## 它解决什么问题
@@ -26,7 +30,24 @@
 | 三种模式 | 讲解模式（默认）、训练模式（分步提示）、解题模式（用户明确要求时才完整解答） |
 | 结构闸门 | `check_output.mjs` 检查八模块、编号、空位、图片与泄题风险 |
 
-## 快速安装
+## 下载 Release 安装
+
+从 [Releases](https://github.com/dreamor/shenti-coach/releases/latest) 下载 `skill.zip` 与 `skill.zip.sha256`，解压后得到 `shenti-coach/` 目录：
+
+```bash
+unzip skill.zip
+mv shenti-coach ~/.codex/skills/
+```
+
+校验附件：
+
+```bash
+shasum -a 256 -c skill.zip.sha256
+```
+
+`skill.zip` 内含 `SKILL.md`、`references/`、`scripts/`、`examples/`、`README.md`、`LICENSE` 与 `VERSION`，解压即可使用。
+
+## 从源码安装
 
 ### Codex
 
@@ -157,6 +178,29 @@ node scripts/render_bigbang.mjs spec.json bigbang.png \
 
 ```bash
 npm run demo:render
+```
+
+## 开发、CI 与发布
+
+本地自检与打包：
+
+```bash
+npm run lint      # 元数据、JSON、JS 语法、绝对路径、示例规格、结构闸门
+npm run package   # 生成 dist/skill.zip 与 dist/skill.zip.sha256
+npm run verify    # lint + package
+```
+
+GitHub Actions：
+
+- **CI**（`.github/workflows/ci.yml`）：在 push / PR 时运行 `npm run lint`，并实际渲染示例 PNG 验证生图链路。
+- **Release**（`.github/workflows/release.yml`）：推送 `v*` 标签后先复用 CI，再校验标签与 `package.json` 版本一致，构建 `skill.zip`，创建 GitHub Release 并上传附件。
+
+发布新版本：
+
+```bash
+# 先同步 package.json 与 SKILL.md 的版本号
+git tag v2.1.0
+git push origin v2.1.0
 ```
 
 ## 设计原则
