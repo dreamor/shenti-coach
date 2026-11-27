@@ -5,8 +5,8 @@
 遵循 [Agent Skills 规范](https://agentskills.io/specification)，可直接用于 Codex、Claude Code 及其他兼容 Agent Skills 的客户端。
 
 [![CI](https://github.com/dreamor/shenti-coach/actions/workflows/ci.yml/badge.svg)](https://github.com/dreamor/shenti-coach/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/dreamor/shenti-coach)](https://github.com/dreamor/shenti-coach/releases/latest)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Release](assets/badges/release.svg)](https://github.com/dreamor/shenti-coach/releases/latest)
+[![License: MIT](assets/badges/license.svg)](LICENSE)
 
 ![审题大爆炸展开图示例](examples/demo-bigbang.png)
 

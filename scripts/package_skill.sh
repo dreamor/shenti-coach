@@ -18,7 +18,7 @@ STAGE_SKILL="$STAGE/shenti-coach"
 
 mkdir -p "$STAGE_SKILL" "$DIST"
 cp "$ROOT/SKILL.md" "$ROOT/README.md" "$ROOT/LICENSE" "$ROOT/package.json" "$STAGE_SKILL/"
-cp -R "$ROOT/references" "$ROOT/scripts" "$ROOT/examples" "$STAGE_SKILL/"
+cp -R "$ROOT/assets" "$ROOT/references" "$ROOT/scripts" "$ROOT/examples" "$STAGE_SKILL/"
 printf '%s\n' "$VERSION" > "$STAGE_SKILL/VERSION"
 
 # 不把本机缓存或渲染中间产物打进发布包。

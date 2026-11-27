@@ -1,0 +1,43 @@
+name: Update badges
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release-badge:
+    name: Regenerate release badge
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: main
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Regenerate release badge
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          VERSION="${TAG:-v$(node -p "require('./package.json').version")}"
+          node scripts/make_badge.mjs release "$VERSION" assets/badges/release.svg blue
+
+      - name: Commit badge if changed
+        run: |
+          if git diff --quiet -- assets/badges/release.svg; then
+            echo "badge already up to date"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/badges/release.svg
+          git commit -m "chore: update release badge"
+          git push || echo "::warning::could not push badge update (check branch protection)"
