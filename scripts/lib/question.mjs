@@ -1,8 +1,11 @@
 // 题库输入规范化：把不同年份/地区的 options/images 形态整理成技能可消费的统一结构。
-// 纯函数，便于单测；不读取答案作为讲解输入。
+// 保留旧归档字段；讲解输入必须使用无答案/路径的 allowlist 投影。仅在宿主 publicRoot 内探测图件。
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { assertInputData, buildInputViews, renderInputPrompt } from './input-boundary.mjs';
+
+export { buildInputViews } from './input-boundary.mjs';
 
 const LABELS = 'ABCDEFGH';
 
@@ -14,8 +17,10 @@ function asArray(value) {
     if (!s) return [];
     try {
       const parsed = JSON.parse(s);
+      assertInputData(parsed);
       return Array.isArray(parsed) ? parsed : [parsed];
-    } catch {
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
       return [s];
     }
   }
@@ -52,11 +57,13 @@ function parseOptionItem(item, index) {
 }
 
 export function parseOptions(raw) {
+  assertInputData(raw);
   if (raw == null || raw === '') return { format: 'none', options: [] };
   let value = raw;
   if (typeof raw === 'string') {
     try { value = JSON.parse(raw); } catch { value = splitOptionString(raw); }
   }
+  assertInputData(value);
   if (Array.isArray(value)) {
     // 数组元素本身就是选项；换行是续行，不能再拆分或重置后续编号。
     const options = value.map((item, i) => parseOptionItem(item, i));
@@ -101,11 +108,31 @@ function collectTopImages(q) {
 }
 
 function toAbsoluteImage(p, publicRoot) {
-  if (!p) return p;
-  if (/^file:\/\//.test(p)) return p;
-  if (p.startsWith('/')) return path.join(publicRoot, p.slice(1));
-  if (path.isAbsolute(p)) return p;
-  return path.join(publicRoot, p);
+  // Source paths are references, not authority to access URLs or files outside
+  // the caller-owned public root. Keep the original only in the private view.
+  if (typeof p !== 'string' || !p || /[\u0000-\u001f\\]/.test(p) || /^[a-z][a-z\d+.-]*:/i.test(p) || p.startsWith('//')) return null;
+  const root = path.resolve(publicRoot);
+  const absolutePath = path.resolve(root, p.replace(/^\//, ''));
+  const relative = path.relative(root, absolutePath);
+  return relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative) ? null : absolutePath;
+}
+
+function publicImageExists(absolutePath, publicRoot) {
+  if (!absolutePath) return false;
+  const root = path.resolve(publicRoot);
+  const parts = path.relative(root, absolutePath).split(path.sep).filter(Boolean);
+  let current = root;
+  try {
+    // Never follow a source-selected symlink to escape the host root.
+    for (let i = 0; i < parts.length; i += 1) {
+      current = path.join(current, parts[i]);
+      const stat = fs.lstatSync(current);
+      if (stat.isSymbolicLink() || (i < parts.length - 1 ? !stat.isDirectory() : !stat.isFile())) return false;
+    }
+    return parts.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 function countPlaceholders(stem) {
@@ -199,6 +226,9 @@ function extractSubquestionDetails(stem) {
 }
 
 export function normalizeQuestion(q, options = {}) {
+  assertInputData(q);
+  assertInputData(options);
+  if (!q || typeof q !== 'object' || Array.isArray(q) || !options || typeof options !== 'object' || Array.isArray(options)) throw new TypeError('Question and host options must be records');
   const publicRoot = options.publicRoot ?? 'public';
   const warnings = [];
   const notes = [];
@@ -209,12 +239,10 @@ export function normalizeQuestion(q, options = {}) {
   const isChoice = ['choice', 'multi_choice'].includes(kind);
   const topImagesRaw = collectTopImages(q);
   const optionImagePaths = parsed.options.flatMap((o) => o.images).filter(Boolean);
-  const topImageSet = new Set(topImagesRaw);
   const optionImageSet = new Set(optionImagePaths);
 
   // 顶层 images 可能同时包含题干图与选项图。按选项图路径扣除，其余归到题干。
   const stemImagesRaw = topImagesRaw.filter((p) => !optionImageSet.has(p));
-  const allImages = [...new Set([...stemImagesRaw, ...optionImagePaths, ...topImagesRaw])];
   const figures = [];
   for (const p of stemImagesRaw) {
     figures.push({ id: `G${figures.length + 1}`, path: p, absolutePath: toAbsoluteImage(p, publicRoot), role: 'stem' });
@@ -259,7 +287,8 @@ export function normalizeQuestion(q, options = {}) {
     warnings.push('有图片但题干没有 [图] 占位；请按图片内容补 G 编号');
   }
   for (const f of figures) {
-    if (!fs.existsSync(f.absolutePath)) warnings.push(`图片文件不存在：${f.absolutePath}`);
+    if (!f.absolutePath) warnings.push(`图片路径未获宿主 publicRoot 范围授权（待核实）：${f.id}`);
+    else if (!publicImageExists(f.absolutePath, publicRoot)) warnings.push(`图片文件不存在或为未授权符号链接：${f.absolutePath}`);
   }
   const subquestions = extractSubquestions(stem);
   const subquestionDetails = extractSubquestionDetails(stem);
@@ -294,79 +323,7 @@ export function normalizeQuestion(q, options = {}) {
     .map((k) => (k && typeof k === 'object' ? [k.code, k.name].filter(Boolean).join(' ') : String(k)))
     .filter(Boolean);
 
-  const promptParts = [];
-  promptParts.push(`# 题目 ${q.subject ?? ''} ${q.region ?? ''} ${q.year ?? ''} 第${q.seq ?? '?'}题`);
-  promptParts.push(`- 学科：${q.subject ?? '待识别'}`);
-  promptParts.push(`- 地区/年份：${q.region ?? '未注明'} / ${q.year ?? '未注明'}`);
-  promptParts.push(`- 题号/题型：${q.seq ?? '?'} / ${type || '未注明'}（规范化：${kind}）`);
-  if (kps.length) promptParts.push(`- 知识标签（定位用，不当作已核实结论）：${kps.join('；')}`);
-  promptParts.push('', '## 题干', '', stem || '（空）');
-  if (isChoice && parsed.options.length) {
-    promptParts.push('', '## 选项');
-    for (const o of parsed.options) {
-      const ids = figures.filter((f) => f.role === 'option' && f.option === o.label).map((f) => f.id);
-      const imgs = ids.length ? `  ［配图：${ids.join('、')}］` : '';
-      promptParts.push(`- ${o.label}. ${o.text}${imgs}`);
-    }
-  } else if (!isChoice && parsed.options.length) {
-    promptParts.push('', '## 题内嵌选项（属于某一小问，勿当作整题选项）');
-    for (const o of parsed.options) {
-      const ids = figures.filter((f) => f.role === 'option' && f.option === o.label).map((f) => f.id);
-      const imgs = ids.length ? `  ［配图：${ids.join('、')}］` : '';
-      promptParts.push(`- ${o.label}. ${o.text}${imgs}`);
-    }
-  }
-  if (figures.length) {
-    promptParts.push('', '## 图形清单（按顺序对应题面 [图]）');
-    for (const f of figures) {
-      promptParts.push(`- ${f.id}｜${f.role === 'option' ? `选项${f.option}图` : '题干图'}｜${f.absolutePath}`);
-    }
-  }
-  if (subquestions.length) promptParts.push('', `## 小问清单：${subquestions.join('、')}`);
-  if (blankCount) {
-    promptParts.push('', '## 空白清单（机读预检，写入输出前必须逐空核对）');
-    promptParts.push(`- 总空位：${blankCount} 个；编号 B1–B${blankCount}，一空一 B。`);
-    if (subquestions.length) {
-      promptParts.push('', '| 小问 | 本问空位数 | 对应 B 号（按题面顺序） |', '| --- | ---: | --- |');
-      let cursor = 0;
-      for (const s of subquestionDetails) {
-        const ids = Array.from({ length: s.blanks }, (_, i) => `B${cursor + i + 1}`);
-        cursor += s.blanks;
-        promptParts.push(`| Q${s.label} | ${s.blanks} | ${ids.join('、') || '无'} |`);
-      }
-      if (mappedBlanks < blankCount) {
-        promptParts.push(`| 小问编号前/未归类 | ${blankCount - mappedBlanks} | B${mappedBlanks + 1}–B${blankCount}（按原文位置核对） |`);
-      }
-    } else {
-      promptParts.push(`- 无小问编号：按题面从左到右依次编 B1…B${blankCount}。`);
-    }
-  }
-  if (warnings.length) {
-    promptParts.push('', '## 输入提示（先核对，不猜测）');
-    for (const w of warnings) promptParts.push(`- ${w}`);
-  }
-  if (notes.length) {
-    promptParts.push('', '## 结构说明');
-    for (const n of notes) promptParts.push(`- ${n}`);
-  }
-  if (options.includeAnswer) {
-    promptParts.push('', '## 答案/解析（仅“解题模式”可用；讲解模式不得读取）', '', String(q.answer ?? ''), '', String(q.analysis ?? ''));
-  }
-  if (options.includeSolution) {
-    const officialAnswer = String(q.answer ?? '').trim();
-    promptParts.push(
-      '',
-      '## 官方答案（仅用于核对 B 号、答案指纹与阶段边界；不得抄进讲解正文）',
-      '',
-      officialAnswer || '（无独立答案字段）',
-      '',
-      '## 官方解析（仅用于核对 B 号、答案指纹与阶段边界；不得抄进讲解正文）',
-      '',
-      String(q.solution ?? q.analysis ?? q.answer ?? '（无）'),
-    );
-  }
-
-  return {
+  const normalized = {
     id: q.id,
     subject: q.subject,
     region: q.region,
@@ -387,10 +344,18 @@ export function normalizeQuestion(q, options = {}) {
     solution: String(q.solution ?? q.analysis ?? ''),
     warnings,
     notes,
-    prompt_markdown: promptParts.join('\n'),
+    // Retain source OCR/web/image metadata privately; never infer controls from it.
+    input_sources: Object.fromEntries(['ocr', 'ocr_text', 'rawweb', 'raw_web', 'web', 'images', 'image', 'figures'].filter((key) => Object.hasOwn(q, key)).map((key) => [key, structuredClone(q[key])])),
   };
+  const views = buildInputViews(normalized, { mode: options.mode ?? 'explain' });
+  normalized.input_boundary = views.boundary;
+  normalized.prompt_markdown = renderInputPrompt(views, { includeAnswer: options.includeAnswer, includeSolution: options.includeSolution, analysis: String(q.analysis ?? '') });
+  assertInputData(normalized); // Also bound encoded output; every returned record can be safely re-projected.
+  return normalized;
 }
 
 export function normalizeMany(questions, options = {}) {
+  // Apply limits per question, not to a legitimate full-library batch.
+  if (!Array.isArray(questions)) throw new TypeError('Questions must be an input data list');
   return questions.map((q) => normalizeQuestion(q, options));
 }

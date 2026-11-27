@@ -44,7 +44,7 @@
 ```
 
 - **多小问必须按 Q 分组**：3 个小问以上，或节点超过 20 个时，用 `groups` 把每个 Q 的条件、隐含条件、B 卡放进同一子图；连线改成 `ROOT → Qn → C/H/B/G → …`。禁止所有非 ROOT 节点都直接连 ROOT 的星形图。
-- `mode` 可选 `explain`（默认）或 `training`。训练模式第3步出图时必须写 `"mode": "training"`，脚注会自动改为“训练模式配图 · 只在第3步揭示条件与路径”，避免图与当前模式不一致；未写时按标题里的“训练”二字兜底识别。
+- `mode` 可选 `explain`（默认）或 `training`。训练揭示阶段出图时必须写 `"mode": "training"`，脚注会自动改为“训练模式配图 · 只在第3步揭示条件与路径”，避免图与当前模式不一致；旧 renderer 未写时按标题里的“训练”二字兜底识别，但这仅是图的文案行为，**不是训练状态或交付授权**。新投影器只信可信 CLI 模式与验证后的 `phase=reveal` 状态，不从题目/audit/图标题切换模式。
 - `groups` 的 `id` 用 `GQ1`、`GQ2`…，不能与节点 id 重名；同一节点只能出现在一个分组。分组标题写 `Q1 任务骨架`，不要写答案。
 - 单问题目可以不用 `groups`；一旦用分组，所有组内节点都不再重复出现在组外。
 - **分组归属只认显式来源**：只有来源标为 `Qn` 的条件/隐含条件才能进 `GQn`。总题干背景条件、题干图/选项图、知识点（K）一律挂 ROOT——它们属于整题，塞进某一问会误导学生。H 节点若引用了某条组内 C，就跟着那条 C 的组走；否则挂 ROOT 并保留 `C→H` 连线。
@@ -163,8 +163,8 @@ node <data-visualization目录>/scripts/screenshot.js "<HTML绝对路径>" "<输
 - 通过标准：SVG 正常渲染、无 JS 报错、无原始 Mermaid 源码残留；截图宽度默认 1600，节点特别多时可加宽。
 - 脚本会检查 `.error-icon`、页面中的 `Syntax error`、以及 `#render-status[data-status="error"]`；任一命中即 `ok:false`，不要继续交付。
 - 质检（多模态模型）：直接查看 PNG，检查文字有无重叠、截断、未渲染源码。
-- 质检（非多模态模型）：`node <shenti-coach目录>/scripts/ocr.mjs "<PNG绝对路径>"`，把 OCR 文本与 HTML 中的节点文字逐条比对，确认关键节点都在；OCR 对公式符号可能失真，只用于查漏，不用于判错。
-- 两种质检都不可用时，请用户确认成图，或降级交付文本树。
+- 质检（非多模态模型）：`node <shenti-coach目录>/scripts/ocr.mjs "<PNG绝对路径>" --engine auto --langs zh-Hans,en-US --json`，把 OCR 文本与 HTML 中的节点文字逐条比对，确认关键节点都在；OCR 对公式符号可能失真，只用于查漏，不用于判错。保留 2.2 跨平台入口：auto 先试 macOS Swift/Vision，失败或非 macOS 再试 tesseract；中文需 `chi_sim` 语言包，语言别名会按引擎映射。引擎/语言包缺失、图片读不出或没有文字均明确报错，不伪造识别成功。支持视觉的模型直接看图，不必先 OCR。
+- 两种质检都不可用时，请用户确认成图，或降级交付文本树并说明本地交付限制；不要宣称图片已附加/送达。
 - 发现问题修复后重验，最多 2 次；仍失败则交付文本树并如实说明图片失败原因，不虚构图片、不用 AIGC 生图替代。
 
 批量回归（题库/多题场景）：
@@ -177,11 +177,25 @@ node <shenti-coach目录>/scripts/check_mermaid_batch.mjs "<sources.json>" --jso
 
 2026-11-26 用 exam-helper 全库 1045 道数学/物理/化学/生物真题做过一次批量语法回归：1045/1045 通过。该脚本只验证 Mermaid 语法，不替代文字重叠/截断的人工质检。
 
-## 6. 交付
+## 6. 交付（显式客户端能力与真实文件）
 
-- 每题一行 `MEDIA:<PNG绝对路径>`（路径逐字符取自截图脚本实际输出），可另附一行 HTML 的 MEDIA。
-- 正文不出现裸路径、不用 Markdown 图片语法替代 MEDIA。
-- 多题试卷一题一图，随对应题目的八模块一起交付；训练模式仅第3步揭示后交付。
+交付与渲染分离，详见 [学生呈现与本地交付契约](presentation-and-delivery.md)。新 SKILL 在完整单题 audit 通过真实闸门后调用：
+
+```bash
+node <shenti-coach目录>/scripts/present_output.mjs "<完整audit.md>" "<不存在的新输出目录>" \
+  --mode explain --strict-answer --answer "<答案指纹>" \
+  --delivery auto --capabilities "<明确客户端能力.json>" \
+  --render-result "<真实渲染结果.json>" --expected-path "<预期PNG绝对路径>"
+```
+
+- 渲染结果仅 `ok:true` 不够：必须同时 `status:"ok"`，`output` 与可信 CLI 的预期 PNG 路径一致，且路径确有非空 PNG；验证全部 chunk 边界/CRC、唯一首块 IHDR、连续非空 IDAT、末尾 IEND，并用原生 zlib 解码、检查尺寸/行长/滤波码一致。仅 magic/header/footer 的 stub、坏 CRC、不能解码的 IDAT 均不可成功。支持非交错 8-bit 灰度/RGB/灰度-alpha/RGBA；其余明确 `Unsupported PNG`。限制文件 32 MiB、解压 64 MiB、宽高各 32768、chunk 10000，避免炸弹。视觉/OCR 查漏仍需另做。
+- `auto` 仅依显式能力选择：`media === true` → `localMarkdown === true` → `file`。未知客户端退 file，不能把能力 JSON 或 manifest metadata 当上传/附加授权。
+- media 能力明确且 PNG 实际可用时生成 `MEDIA:<PNG绝对路径>`，不再把 HTML 当图片发出。路径含空格时改用 markdown/file。
+- 仅客户端明确 `localMarkdown` 能力时生成本地 `file:///` Markdown 图片引用，中文/空格用 URI 编码。生成引用只意味着 `reference-ready`，不是客户端已显示、已 attached 或远程可访问。
+- file 模式只给本地 PNG 文件路径，状态为 `local-only` 并明确“未送达”。无渲染时可省略上述三个 JSON/PNG 参数，图片状态明确 `unavailable`，仅保存本地文字，不强行要求 PNG。
+- 输出 `learner.md`、完整原文 `audit.md`、`delivery.json`；保存审计八模块不等于向学生一次展示八模块。默认学生页只有速览、少量核心 C/H 链、路径、陷阱与迁移；逐 Q 保留导航、每问最多三步。原 audit 中旧图片引用不会进入新学生页。含“仅教师/私有/private/官方答案核对”附录的输入直接拒绝，先拆分可共享审计，避免借保存的原 audit 泄露；显式完整解答也仅提取自己 section，不带后续附录。
+- 训练只有真实状态 `phase=reveal` 时可调用，并须给 `--mode training --phase reveal --training-state <状态.json> --student <学生ID> --question <题次ID>`，学生/题次与有效状态绑定；早期一律拒绝，使用状态机当前回复，绝不截取教师原审计交付。训练禁止 `--solution`。
+- 多题一题一审计、一套新输出目录；不覆盖现存目录/源文件，不自动渲染、上传、附加，也不因 `capabilities:true` 宣称已送达。
 
 ## 7. 参考样例
 

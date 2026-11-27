@@ -33,7 +33,7 @@ jobs:
           google-chrome --version || true
 
       - name: Lint and behavioral regression tests
-        run: npm test
+        run: npm run lint && npm test
 
       - name: Render demo big-bang image
         env:
@@ -53,8 +53,8 @@ jobs:
           npm run package
           (cd dist && sha256sum -c skill.zip.sha256)
           unzip -q dist/skill.zip -d dist/package-check
-          test -s dist/package-check/shenti-coach/scripts/tests/output.test.mjs
-          (cd dist/package-check/shenti-coach && node --test)
+          node scripts/verify_package.mjs dist/package-check/shenti-coach
+          (cd dist/package-check/shenti-coach && npm test)
 
       - name: Upload demo image
         uses: actions/upload-artifact@v7

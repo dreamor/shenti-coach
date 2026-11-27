@@ -17,11 +17,20 @@
 - 讲题容易直接报答案——内置“不泄题”铁律与答案指纹闸门。
 - 题目需要一张结构图——内置 Mermaid + Chrome 的离线生图链路，零 npm 依赖。
 
+## v2.3.0：四项增强
+
+1. **默认短页，完整 audit 留存**：学生页只展示 30 秒速览、核心 C/H 链、收敛路径、陷阱与迁移；八模块、教材映射、B 卡与展开树仍完整保存在独立 `audit.md`，不是删减审计。教师审计不会自动作为学生附件发送。
+2. **能力自适应、多媒介交付**：依据可信调用方明确提供的能力，在 MEDIA、Markdown 本地图片引用、文件路径之间选择。校验实际 PNG 与渲染结果；本地文件或 `reference-ready` 不冒充已附上、已上传或远程可访问，缺图如实降级。
+3. **自适应训练与独立迁移**：先由学生独立尝试，按需要逐条提示，停留当前阶段；暂停、恢复、停止与主动揭示受状态机约束。区分独立完成和提示后完成，换题迁移的独立通过才作为真正掌握的证据。
+4. **所有输入数据边界 + 匿名多学生账本**：题面、OCR、题库 payload、答案解析、学生回复、训练状态、账本与交付 manifest 均视为不可信数据，不能授权切模式、跳阶段、执行命令、选择读写路径或声称附件送达。账本只用匿名学生/题次 ID 与条件类型编码，隔离不同学生；持久化、覆盖或删除必须有可信调用方的明确授权，不保存原题、原回复或身份信息。
+
+保留 **v2.2 跨平台 OCR**：多模态直接看图；非多模态降级时使用 macOS Vision → tesseract → 明确报错，绝不伪造识别成功。详细契约见 [呈现与交付](references/presentation-and-delivery.md)、[模式与输入](references/modes-and-input.md)、[输入边界](references/input-boundary.md) 和 [盲区账本](references/blindspot-ledger.md)。
+
 ## 核心能力
 
 | 能力 | 说明 |
 | --- | --- |
-| 八模块输出 | 题目复述、目标分析、显性条件、隐含条件、大爆炸展开、路径提示、陷阱提醒、审题收获 |
+| 短页 + 完整八模块审计 | 默认学生短页；完整题目复述、目标分析、显性/隐含条件、展开、路径、陷阱、收获另存 audit |
 | 四科覆盖 | 数学、物理、化学、生物；自动识别学科，无法判断时默认高一数学 |
 | 条件编号 | `C` 显性条件、`H` 隐含条件、`G` 图形/表格、`Q` 小问、`B` 作答点、`D` 干扰项 |
 | 考纲 + 教材映射 | 每个条件写清“课标要求 + 教材章节 + 知识点内容” |
@@ -45,7 +54,14 @@ mv shenti-coach ~/.codex/skills/
 shasum -a 256 -c skill.zip.sha256
 ```
 
-`skill.zip` 内含 `SKILL.md`、`references/`、`scripts/`、`examples/`、`README.md`、`LICENSE` 与 `VERSION`，解压即可使用。
+`skill.zip` 内含 `SKILL.md`、`references/`、`scripts/`（含 tests、vendor 与 OCR）、`assets/`、`examples/`、`package.json`、`README.md`、`LICENSE` 与 `VERSION`，解压即可使用；不含 `.git/`、`.github/`、`dist/` 或学生运行账本。
+
+解压后也可离线自检（无需仓库或 npm 安装）：
+
+```bash
+node shenti-coach/scripts/verify_package.mjs shenti-coach --version 2.3.0
+(cd shenti-coach && npm test)
+```
 
 ## 从源码安装
 
@@ -95,10 +111,10 @@ git clone https://github.com/dreamor/shenti-coach.git ~/.claude/skills/shenti-co
 
 常用说法：
 
-- **默认**：讲解模式，只拆条件与路径，不给最终答案。
-- **“训练模式”**：分步提示，学生先想，再逐步揭示条件与路径。
-- **“解题”**：明确要求后才进入完整解答。
-- **“批改 / 审题训练”**：按训练模式记录盲区账本。
+- **默认**：讲解模式，先给学生短页，只拆条件与路径，不给最终答案；完整八模块 audit 独立留存。
+- **“训练模式”**：学生先独立尝试，按状态逐条提示，每轮停下等待回复，最后验证独立换题迁移。
+- **“解题”**：可信用户明确要求后才进入完整解答，仍不豁免前置审计与图的答案隔离。
+- **“批改 / 审题训练”**：按匿名学生 ID 隔离盲区账本；默认只在本地内存处理，明确同意后才保存。
 
 ## 目录结构
 
@@ -114,7 +130,9 @@ git clone https://github.com/dreamor/shenti-coach.git ~/.claude/skills/shenti-co
 │   ├── answer-isolation.md      # 答案隔离与 B 卡矩阵
 │   ├── modes-and-input.md       # 讲解/训练/解题模式、图片输入
 │   ├── batch-run.md             # 题库批量跑题
-│   ├── blindspot-ledger.md      # 训练模式盲区账本
+│   ├── blindspot-ledger.md      # 匿名多学生盲区账本
+│   ├── presentation-and-delivery.md # 学生短页、完整 audit 与多媒介本地交付
+│   ├── input-boundary.md        # 所有输入数据的不可信边界
 │   ├── experiment-checklist.md  # 实验题检查表
 │   ├── example.md               # 完整示例
 │   ├── regression-suite.md      # 回归题库说明
@@ -129,6 +147,11 @@ git clone https://github.com/dreamor/shenti-coach.git ~/.claude/skills/shenti-co
 │   ├── check_mermaid_batch.mjs
 │   ├── ocr.mjs                 # 跨平台 OCR 入口：Vision → tesseract → 明确报错
 │   ├── ocr.swift
+│   ├── present_output.mjs      # audit → 学生短页 + 交付 manifest
+│   ├── training_state.mjs      # 自适应训练状态与迁移验证
+│   ├── blindspot_ledger.mjs    # 匿名本地账本
+│   ├── verify_package.mjs      # 版本 / layout / runtime 排除自检
+│   ├── tests/                  # Node 原生回归，包内可运行
 │   └── vendor/mermaid.min.js
 └── examples/
     ├── demo-spec.json
@@ -192,24 +215,24 @@ npm run demo:render
 本地自检与打包：
 
 ```bash
-npm run lint      # 元数据、JSON、JS 语法、绝对路径、示例规格、结构闸门
-npm test          # lint + Node 原生行为回归（答案隔离、输入保真、预检与模式边界）
-npm run package   # 生成 dist/skill.zip 与 dist/skill.zip.sha256；需 zip / unzip
-npm run verify    # test + package
+npm run lint      # 仓库严格检查：元数据、JSON、JS、路径、示例、结构闸门
+npm test          # 仅 Node 原生行为回归；解压包也能运行，不依赖 .github / .git
+npm run package   # 全新 dist/skill.zip + SHA-256；需 zip / unzip
+npm run verify    # lint + test + package（完整仓库中运行）
 ```
+
+无 zip / Chrome 的本地环境只跳过相应工具相关测试，不冒充完成归档或图片验证；CI 提供这些工具并实际跑归档、重打包防残留与生图。版本 / layout / runtime 排除验证只使用 Node，不调用模型。
+
+**打包来源边界**：有 `.git` 时只复制 Git 已跟踪且位于固定发布源码白名单的文件；未跟踪的学生数据、输出和新源码都不入包（新源码需先纳入 Git）。无 `.git` 的已解压源码包仅按固定文档名、脚本后缀、tests/vendor/OCR 与示例文件白名单重打包；新目录、文档名和资源格式需人工审查并扩展白名单，不递归复制任意运行数据。白名单不替代对允许源码文件本身的隐私审查；不要把学生信息写入源码。输出目录可用相对路径，旧 ZIP 会整体替换而不是追加更新，避免保留旧条目。
 
 GitHub Actions：
 
-- **CI**（`.github/workflows/ci.yml`）：在 push / PR 时运行 `npm test`，实际渲染示例 PNG，并打包、校验 SHA-256、从解压包运行行为回归；示例渲染的中间产物仅写入 `dist/`。
-- **Release**（`.github/workflows/release.yml`）：推送 `v*` 标签后先复用 CI，再校验标签与 `package.json` 版本一致，构建 `skill.zip`，创建 GitHub Release 并上传附件。
+- **CI**（`.github/workflows/ci.yml`）：push/main 与 PR 运行 `npm run lint && npm test`，实际渲染示例 PNG，再构建、校验 SHA-256 / layout / 三处版本，并从无 `.github/.git` 的解压包运行 `npm test`；中间产物仅写入 `dist/`。
+- **Release**（`.github/workflows/release.yml`）：只接受版本匹配的 `v*` 标签，标签指向的来源 SHA 必须已在 `ci.yml` 的 **push/main** 运行中成功，PR、tag 或 reusable CI 不能替代。发布 job 独立重建自己的 ZIP，重新校验 SHA-256、解压版本/layout 并运行包内 `npm test`，只创建 Release，绝不覆盖同 tag 的已有 Release 或附件；API 鉴权/网络失败直接终止。
 
-发布新版本：
+**发布顺序**：同步 `package.json`、`SKILL.md` 与 changelog，合并 main；确认该精确 SHA 的 push/main CI 成功后，把新标签创建在该 SHA，再推送标签。标签或 Release 已存在时停止核查，不 force、不删除重建旧标签、不改写旧附件。
 
-```bash
-# 先同步 package.json 与 SKILL.md 的版本号
-git tag v2.1.0
-git push origin v2.1.0
-```
+发布 workflow 使用 `github.token`，其发布事件不会自动级联触发徽章 workflow。已授权的维护者可在发布后显式运行 `gh workflow run badges.yml --ref main`，无需新增 PAT secret。徽章提交带 `Co-Authored-By: Claude Code <noreply@anthropic.com>` footer，普通 push；保护分支或并发冲突会明确失败，不强推。
 
 ## 设计原则
 

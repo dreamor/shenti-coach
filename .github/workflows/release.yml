@@ -7,19 +7,15 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  ci:
-    name: CI
-    uses: ./.github/workflows/ci.yml
-
   release:
-    name: Build skill.zip and publish release
-    needs: ci
+    name: Verify main CI, build and create release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -32,44 +28,59 @@ jobs:
         with:
           node-version: 24
 
-      - name: Verify tag matches package.json
+      - name: Require matching tag, successful push/main CI and no existing release
         env:
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
+          set -euo pipefail
           VERSION="$(node -p "require('./package.json').version")"
-          test "$TAG" = "v$VERSION" || {
-            echo "tag $TAG does not match package.json v$VERSION" >&2
-            exit 1
-          }
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$TAG" = "v$VERSION"
+          SHA="$(git rev-parse "$TAG^{commit}")"
+          test "$SHA" = "$(git rev-parse HEAD)"
+          git merge-base --is-ancestor "$SHA" origin/main
+          # This workflow endpoint plus all three identity checks excludes PR,
+          # tag and workflow_call runs, even if their conclusions are success.
+          RUNS="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?event=push&branch=main&head_sha=$SHA&per_page=100" \
+            --jq '.workflow_runs[] | select(.head_sha == "'"$SHA"'" and .event == "push" and .head_branch == "main" and .path == ".github/workflows/ci.yml" and .status == "completed" and .conclusion == "success") | .id')"
+          test -n "$RUNS" || { echo 'No successful ci.yml push/main run for the exact tag source SHA' >&2; exit 1; }
+          # A failed API request (including auth/network failures) is fatal;
+          # only a successfully fetched, empty match means no release exists.
+          EXISTING="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | select(.tag_name == "'"$TAG"'") | .id')"
+          test -z "$EXISTING" || { echo "Release for $TAG already exists; refusing to overwrite" >&2; exit 1; }
 
-      - name: Build skill.zip
-        run: bash scripts/package_skill.sh
+      - name: Check release source
+        run: npm run lint && npm test
 
-      - name: Verify package layout
+      - name: Build and independently verify this release ZIP
         run: |
-          unzip -l dist/skill.zip
-          unzip -p dist/skill.zip shenti-coach/SKILL.md | head -8
-          unzip -p dist/skill.zip shenti-coach/scripts/vendor/mermaid.min.js | wc -c
-          test -s dist/skill.zip.sha256
+          set -euo pipefail
+          npm run package
+          (cd dist && sha256sum -c skill.zip.sha256)
+          unzip -t dist/skill.zip
+          unzip -q dist/skill.zip -d dist/release-check
+          node scripts/verify_package.mjs dist/release-check/shenti-coach --version "${GITHUB_REF_NAME#v}"
+          (cd dist/release-check/shenti-coach && npm test)
 
       - name: Prepare release notes
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          sed "s/{{TAG}}/$TAG/g" .github/release-notes.md > dist/release-notes.md
-          cat dist/release-notes.md
+          node --input-type=module -e 'import fs from "node:fs"; fs.writeFileSync("dist/release-notes.md", fs.readFileSync(".github/release-notes.md", "utf8").replaceAll("{{TAG}}", process.env.TAG));'
 
-      - name: Publish GitHub Release
+      - name: Create GitHub Release (never edit existing tags or assets)
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --title "shenti-coach $TAG" --notes-file dist/release-notes.md
-            gh release upload "$TAG" dist/skill.zip dist/skill.zip.sha256 --clobber
-          else
-            gh release create "$TAG" dist/skill.zip dist/skill.zip.sha256 \
-              --verify-tag \
-              --title "shenti-coach $TAG" \
-              --notes-file dist/release-notes.md
-          fi
+          set -euo pipefail
+          EXISTING="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | select(.tag_name == "'"$TAG"'") | .id')"
+          test -z "$EXISTING" || { echo "Release for $TAG already exists; refusing to overwrite" >&2; exit 1; }
+          (cd dist && sha256sum -c skill.zip.sha256)
+          gh release create "$TAG" dist/skill.zip dist/skill.zip.sha256 \
+            --verify-tag \
+            --title "shenti-coach $TAG" \
+            --notes-file dist/release-notes.md
