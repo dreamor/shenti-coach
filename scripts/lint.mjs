@@ -57,6 +57,7 @@ const required = [
   'references/subject-libs.md',
   'scripts/check_output.mjs',
   'scripts/render_bigbang.mjs',
+  'scripts/ocr.mjs',
   'scripts/vendor/mermaid.min.js',
   'examples/demo-spec.json',
   'examples/demo-bigbang.png',

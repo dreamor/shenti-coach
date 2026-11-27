@@ -1,5 +1,11 @@
 # 版本记录
 
+## 2.2 — 2026-11-27（跨平台 OCR 入口）
+
+- 新增 `scripts/ocr.mjs` 统一 OCR 入口：平台探测 → macOS Vision → tesseract → 明确报错；macOS 零额外依赖，Windows/Linux 可回退 tesseract，两个引擎都不可用时非零退出并给出安装方式。
+- `ocr.swift` 新增 `--list-langs`、语言支持校验与失败退出码；不支持的语言直接报错，避免 Vision 静默降级输出乱码。
+- 文档中的 OCR 调用统一改为 `node scripts/ocr.mjs`，README 补充各平台依赖与安装提示。
+
 ## 2.1 — 2026-11-27（训练模式专项自检）
 
 - `check_output.mjs` 新增 `--mode training`：校验第1–4步齐全且有序、第1/2步不出图、第2步 1–2 轮且每轮只 1 条触发词提示、第3步有 H 表与 MEDIA 图、第4步有盲区账本、全文无答案指纹；训练记录不再被八模块闸门误判 FAIL。

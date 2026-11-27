@@ -82,7 +82,10 @@ git clone https://github.com/dreamor/shenti-coach.git ~/.claude/skills/shenti-co
 - **Node.js ≥ 22**：运行校验与生图脚本；截图链路依赖 Node 内置的 WebSocket。
 - **Chrome / Chromium / Edge**：把 HTML 截图成 PNG；可用 `CHROME_PATH` 指定浏览器路径。
 - **无第三方 npm 依赖**：Mermaid 已内置于 `scripts/vendor/mermaid.min.js`，离线可用。
-- macOS 可选：`swift scripts/ocr.swift <PNG>` 用于图片文字查漏。
+- 可选 OCR（非多模态模型读题 / 成图查漏）：`node scripts/ocr.mjs <图片...>`。
+  - macOS：优先使用系统 Vision（需 Xcode Command Line Tools，离线、零额外依赖）。
+  - Windows / Linux / Vision 不可用：自动回退 `tesseract`（需自行安装；中文需 `chi_sim` 语言包）。
+  - 两个引擎都不可用时脚本会非零退出并给出安装提示，不会伪造识别结果。
 
 ## 怎么用
 
@@ -124,6 +127,7 @@ git clone https://github.com/dreamor/shenti-coach.git ~/.claude/skills/shenti-co
 │   ├── normalize_question.mjs   # 题库输入规范化
 │   ├── preflight_question.mjs   # 写八模块前预检
 │   ├── check_mermaid_batch.mjs
+│   ├── ocr.mjs                 # 跨平台 OCR 入口：Vision → tesseract → 明确报错
 │   ├── ocr.swift
 │   └── vendor/mermaid.min.js
 └── examples/

@@ -1,6 +1,6 @@
 {
   "name": "shenti-coach",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "高中审题教练 Agent Skill：拆条件、挖隐含条件、映射考纲与教材、生成审题大爆炸图。",
   "type": "module",
   "license": "MIT",

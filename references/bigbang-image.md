@@ -163,7 +163,7 @@ node <data-visualization目录>/scripts/screenshot.js "<HTML绝对路径>" "<输
 - 通过标准：SVG 正常渲染、无 JS 报错、无原始 Mermaid 源码残留；截图宽度默认 1600，节点特别多时可加宽。
 - 脚本会检查 `.error-icon`、页面中的 `Syntax error`、以及 `#render-status[data-status="error"]`；任一命中即 `ok:false`，不要继续交付。
 - 质检（多模态模型）：直接查看 PNG，检查文字有无重叠、截断、未渲染源码。
-- 质检（非多模态模型）：`swift <shenti-coach目录>/scripts/ocr.swift "<PNG绝对路径>"`，把 OCR 文本与 HTML 中的节点文字逐条比对，确认关键节点都在；OCR 对公式符号可能失真，只用于查漏，不用于判错。
+- 质检（非多模态模型）：`node <shenti-coach目录>/scripts/ocr.mjs "<PNG绝对路径>"`，把 OCR 文本与 HTML 中的节点文字逐条比对，确认关键节点都在；OCR 对公式符号可能失真，只用于查漏，不用于判错。
 - 两种质检都不可用时，请用户确认成图，或降级交付文本树。
 - 发现问题修复后重验，最多 2 次；仍失败则交付文本树并如实说明图片失败原因，不虚构图片、不用 AIGC 生图替代。
 
