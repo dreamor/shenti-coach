@@ -9,9 +9,9 @@
   },
   "scripts": {
     "lint": "node scripts/lint.mjs",
-    "test": "npm run lint",
+    "test": "npm run lint && node --test",
     "demo:render": "node scripts/render_bigbang.mjs examples/demo-spec.json examples/demo-bigbang.png --width 1600 --scale 2",
     "package": "bash scripts/package_skill.sh",
-    "verify": "npm run lint && npm run package"
+    "verify": "npm test && npm run package"
   }
 }

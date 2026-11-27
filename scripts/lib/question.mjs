@@ -25,17 +25,16 @@ function asArray(value) {
 function splitOptionString(text) {
   const raw = String(text ?? '').trim();
   if (!raw) return [];
-  const lines = raw.split(/\r?\n|(?=\s*[A-H][.．、:：])/).map((x) => x.trim()).filter(Boolean);
-  if (lines.length > 1) return lines;
-  const matches = [...raw.matchAll(/(?:^|\s)([A-H])[.．、:：]\s*/g)];
-  if (matches.length >= 2) {
+  const matches = [...raw.matchAll(/([A-H])\s*[.．、:：]\s*/g)];
+  if (matches.length && !raw.slice(0, matches[0].index).trim()) {
     return matches.map((m, i) => {
       const start = m.index + m[0].length;
       const end = i + 1 < matches.length ? matches[i + 1].index : raw.length;
       return `${m[1]}. ${raw.slice(start, end).trim()}`;
     });
   }
-  return [raw];
+  // 仅顶层无标记字符串保留“每行一个选项”的旧输入兼容。
+  return raw.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
 }
 
 function parseOptionItem(item, index) {
@@ -59,13 +58,8 @@ export function parseOptions(raw) {
     try { value = JSON.parse(raw); } catch { value = splitOptionString(raw); }
   }
   if (Array.isArray(value)) {
-    const options = value.flatMap((item, i) => {
-      if (typeof item === 'string') {
-        const parts = splitOptionString(item);
-        return parts.length > 1 ? parts.map((p, j) => parseOptionItem(p, j)) : [parseOptionItem(item, i)];
-      }
-      return [parseOptionItem(item, i)];
-    });
+    // 数组元素本身就是选项；换行是续行，不能再拆分或重置后续编号。
+    const options = value.map((item, i) => parseOptionItem(item, i));
     return { format: value.every((x) => typeof x === 'string') ? 'list' : 'list-object', options };
   }
   if (value && typeof value === 'object') {

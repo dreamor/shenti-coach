@@ -166,7 +166,7 @@ const gateArgs = [
   'references/example.md',
   '--type', 'solution',
   '--blanks', '0',
-  '--answer-slots', '0',
+  '--answer-slots', '1',
   '--q-count', '1',
   '--json',
 ];

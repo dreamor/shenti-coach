@@ -24,7 +24,12 @@ const SUBQ_RE = /[（(]\s*([1-9１-９]|[ⅠⅡⅢⅣ])\s*[）)]/g;
 const ANSWER_MARK_RE = /[（(]\s*([1-9１-９]|[ⅠⅡⅢⅣ])\s*[）)]/g;
 const CIRCLED_RE = /[①②③④⑤⑥⑦⑧⑨⑩]/g;
 const OPEN_WORDS = ['原因', '理由', '目的', '作用', '优点', '措施', '方案', '设计', '解释', '说明', '判断', '评价', '分析'];
-const IMPLICIT_ANSWER_RE = /(说明|解释|分析|为什么|原因|理由|目的|作用|优点|意义|措施|建议|评价|写出|指出|简述|阐述|判断|求|证明|回答)/;
+// 同一套动作边界用于有空/无空题：分句首或明确的“并/且”连接，不能只见词就加点。
+const DEMAND_RE = /(?:^\s*|(?:并且|并|且)\s*)(?:(?:请|试|再)\s*)?(说明(?!了)|解释(?!了)|分析|为什么|写出|指出|简述|阐述|判断|能否|是否|求|计算(?!结果|过程)|证明|回答|画出|画图|作图|作出|绘制|画|标出|完成|设计|提出|排序|连接|讨论|估计|推导|比较)/g;
+const BLANK_RE = /_{2,}|＿{2,}/;
+const CLAUSE_RE = /([，,。；;？！?!\n]+)/;
+const ANSWER_CONTINUATION_RE = /^\s*(?:答(?:案)?|结果(?:为|是|[:：])|(?:\$[^$]+\$|[A-Za-z][A-Za-z0-9_{}^]*)\s*[=＝]|_{2,}|＿{2,})/;
+const REASON_CONTINUATION_RE = /^\s*(?:因为|由于|理由|原因)/;
 // 一个带编号小问里可能再嵌 ①②③ / a. b. 子任务；它们各自都是作答点。
 // 只用于“提示人工拆分”，不直接加进 answer_slots，避免把选项 a/b/c/d 误当成子问。
 const SUBITEM_MARK_RE = /(?:^|[\n。；;])\s*([①②③④⑤⑥⑦⑧⑨⑩]|[a-h])\s*[．.、:：]?\s*/g;
@@ -106,6 +111,35 @@ function countDemandSubItems(text) {
   return n;
 }
 
+function demandGroups(text) {
+  const groups = [];
+  let current = null;
+  const clauses = String(text ?? '').split(CLAUSE_RE);
+  for (let i = 0; i < clauses.length; i += 2) {
+    const clause = clauses[i];
+    if (!clause.trim()) continue;
+    const marks = [...clause.matchAll(DEMAND_RE)].map((mark) => ({ action: mark[1], index: mark.index }));
+    // 主语后的“是否/能否”只有以问号结束才补为判断动作，陈述中的提及不计点。
+    if (!marks.length && /是否|能否/.test(clause) && /[？?]/.test(clauses[i + 1] ?? '')) {
+      marks.push({ action: '判断', index: 0 });
+    }
+    if (marks.length) {
+      for (let j = 0; j < marks.length; j++) {
+        const end = marks[j + 1]?.index ?? clause.length;
+        current = { action: marks[j].action, text: clause.slice(marks[j].index, end).trim() };
+        groups.push(current);
+      }
+    } else if (current && (ANSWER_CONTINUATION_RE.test(clause)
+      || (REASON_CONTINUATION_RE.test(clause) && /说明|解释|为什么/.test(current.action)))) {
+      // “答：____”、换行空和理由续句属于前一动作，不是另一个隐式点。
+      current.text += `，${clause.trim()}`;
+    } else {
+      current = null;
+    }
+  }
+  return groups;
+}
+
 function audit(row) {
   const stem = String(row.stem ?? '');
   const answer = String(row.official_answer ?? row.answer ?? '');
@@ -113,22 +147,24 @@ function audit(row) {
   const total = Number(row.blank_count ?? 0);
   const details = row.subquestion_details ?? [];
   const mapped = details.reduce((n, d) => n + (d.blanks ?? 0), 0);
-  const implicitSlots = details.flatMap((d) => {
-    if ((d.blanks ?? 0) !== 0) return [];
+  const isChoice = ['choice', 'multi_choice'].includes(row.kind);
+  // 无编号非选择题可以有真实设问，但不制造 subquestion_details/小问编号。
+  const tasks = details.length ? details : [{ label: '', text: stem, blanks: total }];
+  const implicitSlots = isChoice ? [] : tasks.flatMap((d) => {
     const text = String(d.text ?? '');
-    // 规范化的 subquestion_details 里，每个带编号小问本身就是作答点：
-    // 即使没有“求/说明/判断”等触发词（如“$a$ 的值；”“图2结果说明……”），
-    // 也不能因为词表没命中就漏掉。词表只用于判断是否需要拆成“判断+理由”。
     if (!text.trim()) return [];
-    const q = `Q${normLabel(d.label)}`;
-    // 判断 + 说明理由：判断与理由是两个作答点（playbook §5.5）。
-    if (/判断|能否|是否/.test(text) && /说明理由|说明原因|并说明/.test(text)) {
-      return [
-        { q, hint: text.slice(0, 100), kind: '判断' },
-        { q, hint: text.slice(0, 100), kind: '理由' },
-      ];
+    const q = d.label ? `Q${normLabel(d.label)}` : '无小问编号';
+    const demands = demandGroups(text);
+    if (demands.length) {
+      // 每个独立动作分别计数；已有显式空覆盖该动作/答案续句时不再补点。
+      return demands.filter((demand) => !BLANK_RE.test(demand.text)).map((demand) => ({
+        q, hint: demand.text.slice(0, 100),
+        kind: /理由|原因|为什么/.test(demand.text) ? '理由' : demand.action,
+      }));
     }
-    return [{ q, hint: text.slice(0, 100), kind: '作答' }];
+    // 没有动作词的带编号小问仍保留原来的一个作答点；无编号陈述不虚构。
+    return (d.blanks ?? 0) === 0 && details.length
+      ? [{ q, hint: text.slice(0, 100), kind: '作答' }] : [];
   });
   const answerSlots = total + implicitSlots.length;
   const risks = [];

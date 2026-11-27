@@ -12,23 +12,44 @@ if (!file || file.startsWith('--')) {
   process.exit(2);
 }
 
-const getFlag = (name, fallback) => {
-  const i = rest.indexOf(name);
-  return i >= 0 ? rest[i + 1] : fallback;
-};
-const hasFlag = (name) => rest.includes(name);
-const mode = getFlag('--mode', 'explain');
-if (!['explain', 'training'].includes(mode)) {
-  console.error('--mode 只能是 explain 或 training');
+const argumentError = (message) => {
+  console.error(message);
   process.exit(2);
+};
+const valueFlags = new Set(['--mode', '--type', '--blanks', '--answer-slots', '--q-count', '--answer']);
+const booleanFlags = new Set(['--require-media', '--require-blank-map', '--strict-answer', '--solution', '--semantic-reviewed', '--strict-semantic', '--json']);
+const values = new Map();
+const flags = new Set();
+const answerTerms = [];
+for (let i = 0; i < rest.length; i++) {
+  const name = rest[i];
+  if (valueFlags.has(name)) {
+    const value = rest[++i];
+    if (value === undefined || value.startsWith('--')) argumentError(`参数 ${name} 缺少值`);
+    if (!value.trim()) argumentError(`参数 ${name} 的值不能为空`);
+    if (name === '--answer') answerTerms.push(value);
+    else if (!values.has(name)) values.set(name, value);
+  } else if (booleanFlags.has(name)) {
+    flags.add(name);
+  } else {
+    argumentError(`未知参数：${name}`);
+  }
 }
+const getFlag = (name, fallback) => values.has(name) ? values.get(name) : fallback;
+const hasFlag = (name) => flags.has(name);
+const getCount = (name, fallback = null) => {
+  const raw = getFlag(name, null);
+  if (raw === null) return fallback;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 0) argumentError(`参数 ${name} 必须是非负安全整数`);
+  return value;
+};
+const mode = getFlag('--mode', 'explain');
+if (!['explain', 'training'].includes(mode)) argumentError('--mode 只能是 explain 或 training');
 const type = getFlag('--type', 'mixed');
-const blanksRaw = getFlag('--blanks', null);
-const blanks = blanksRaw === null ? null : Number(blanksRaw);
-const qCountRaw = getFlag('--q-count', null);
-const answerSlotsRaw = getFlag('--answer-slots', null);
-const answerSlots = answerSlotsRaw === null ? blanks : Number(answerSlotsRaw);
-const qCount = qCountRaw === null ? null : Number(qCountRaw);
+const blanks = getCount('--blanks');
+const answerSlots = getCount('--answer-slots', blanks);
+const qCount = getCount('--q-count');
 const requireMedia = hasFlag('--require-media');
 const requireBlankMap = hasFlag('--require-blank-map');
 const strictAnswer = hasFlag('--strict-answer');
@@ -36,10 +57,7 @@ const solutionMode = hasFlag('--solution');
 const semanticReviewed = hasFlag('--semantic-reviewed');
 const strictSemantic = hasFlag('--strict-semantic');
 const jsonMode = hasFlag('--json');
-const answerTerms = [];
-for (let i = 0; i < rest.length; i++) {
-  if (rest[i] === '--answer' && rest[i + 1]) answerTerms.push(rest[++i]);
-}
+if (strictAnswer && !answerTerms.length) argumentError('--strict-answer 必须提供至少一个非空 --answer 答案指纹');
 const text = await readFile(file, 'utf8');
 const fail = [];
 const warn = [];
@@ -53,6 +71,29 @@ const add = (name, pass, detail, level = 'fail') => {
   (pass ? ok : level === 'warn' ? warn : fail).push(line);
 };
 const count = (re) => [...text.matchAll(re)].length;
+const firstMissingNumbers = (total, present) => {
+  const ids = new Set(present);
+  const missing = [];
+  for (let n = 1; n <= total && missing.length < 20; n++) {
+    if (!ids.has(n)) missing.push(n);
+  }
+  return missing;
+};
+if (strictSemantic && !semanticReviewed) {
+  add('语义人工复核', false, '使用 --strict-semantic 时必须同时声明 --semantic-reviewed；自动闸门不能证明条件语义正确');
+}
+
+const solutionBoundaries = [...text.matchAll(/^[ \t]*(?:#+[ \t]*)?(?:(完整解答|完整解析|解题过程|解答)\s*$|〇[、.．])/gm)];
+const fullSolutionAt = solutionBoundaries.find((m) => m[1])?.index ?? -1;
+const isAfterFullSolution = (index) => {
+  if (mode !== 'explain' || !solutionMode) return false;
+  let inSolution = false;
+  for (const boundary of solutionBoundaries) {
+    if (boundary.index > index) break;
+    inSolution = Boolean(boundary[1]);
+  }
+  return inSolution;
+};
 
 // 答案指纹里如果出现 C5/H2/B1 这类编号形态，会和正文条件编号撞车。
 // 只遮蔽“明显作为编号使用”的上下文（表格单元格、由 C5 引用、C1–C6 区间、树节点前缀），
@@ -70,19 +111,26 @@ const isStructuralIdOccurrence = (s, idx, term) => {
   if (/[|（(]\s*$/.test(before) && /^\s*[|）)]/.test(after)) return true;
   return false;
 };
+const isPartialNumberOccurrence = (s, idx, term) => {
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(term)) return false;
+  const before = s[idx - 1] ?? '';
+  const after = s.slice(idx + term.length);
+  return /[A-Za-z0-9_.]/.test(before)
+    || /^(?:\d|\.\d)/.test(after)
+    || /^[eE][+-]?\d/.test(after)
+    || (!/^[+-]/.test(term) && /[-−]/.test(before));
+};
 
 const findAnswerLeaks = (terms) => {
   const leaks = [];
   if (!terms.length) return leaks;
-  const fullSolutionAt = text.search(/^#{0,3}\s*(?:完整解答|完整解析|解题过程|解答)\s*$/m);
-  const isAfterFullSolution = (index) => solutionMode && fullSolutionAt >= 0 && index >= fullSolutionAt;
-  // 教材章节名/课标原文是技能强制要求的元数据，可能天然包含答案词
-  // （如“能量”出现在“细胞的能量供应和利用”），不算正文泄题。
-  // 用等长空格遮蔽后扫描，行号与上下文仍取原文。
+  // 教材元数据只遮蔽到字段分隔符，不能连带遮蔽同格中的知识内容或答案。
+  // 图片只遮蔽地址，保留替代文字和同行说明；等长空格保持原始行号与上下文。
   const scanText = text
-    .replace(/课标要求：[^\n|]*/g, (m) => ' '.repeat(m.length))
-    .replace(/教材：[^\n|]*/g, (m) => ' '.repeat(m.length));
-  const headings = [...text.matchAll(/^#{0,3}\s*([〇一二三四五六七])[、.．]/gm)].map((m) => ({
+    .replace(/(?:课标要求|教材)[:：][^\n|；;]*/g, (m) => ' '.repeat(m.length))
+    .replace(/^\s*MEDIA:\S+/gm, (m) => ' '.repeat(m.length))
+    .replace(/(!\[[^\]\n]*\]\()([^\)\n]*)(\))/g, (_, start, url, end) => start + ' '.repeat(url.length) + end);
+  const headings = [...text.matchAll(/^[ \t]*(?:#+[ \t]*)?([〇一二三四五六七])[、.．]/gm)].map((m) => ({
     section: m[1],
     index: m.index,
   }));
@@ -104,13 +152,11 @@ const findAnswerLeaks = (terms) => {
       const lineStart = text.lastIndexOf('\n', idx) + 1;
       const lineEnd = text.indexOf('\n', idx);
       const lineText = text.slice(lineStart, lineEnd < 0 ? text.length : lineEnd);
-      // MEDIA/图片路径里的文件名可能偶然包含答案指纹（如 q11/bigbang 命中“1/b”），不算正文泄题。
-      if (/^\s*MEDIA:/.test(lineText) || /^\s*!\[/.test(lineText)) { from = idx + term.length; continue; }
-      if (isStructuralIdOccurrence(scanText, idx, term)) { from = idx + term.length; continue; }
+      if (isPartialNumberOccurrence(scanText, idx, term) || isStructuralIdOccurrence(scanText, idx, term)) { from = idx + term.length; continue; }
       const line = text.slice(0, idx).split(/\n/).length;
       const section = sectionAt(idx);
       const context = lineText.trim().slice(0, 120) || '';
-      if (!['七', '完整解答'].includes(section)) {
+      if (section !== '完整解答') {
         leaks.push({ term, line, section, context });
       }
       from = idx + term.length;
@@ -303,8 +349,7 @@ if (type === 'fill' || type === 'mixed') {
 if (answerSlots !== null && Number.isFinite(answerSlots)) {
   const bIds = new Set([...text.matchAll(/\bB(\d+)\b/g)].map((m) => m[1]));
   const numeric = [...bIds].map(Number).sort((a, b) => a - b);
-  const expected = Array.from({ length: answerSlots }, (_, i) => i + 1);
-  const missingIds = expected.filter((n) => !numeric.includes(n));
+  const missingIds = firstMissingNumbers(answerSlots, numeric);
   add(
     '一空一 B',
     bIds.size >= answerSlots,
@@ -338,7 +383,8 @@ if (qCount !== null && Number.isFinite(qCount) && qCount > 0) {
       ok.push('PASS 单问（无需 Q 编号或 Q1 已标注）');
     }
   } else {
-    const missingQ = Array.from({ length: qCount }, (_, i) => `Q${i + 1}`).filter((q) => !new RegExp(`\\b${q}\\b`).test(text));
+    const presentQ = [...text.matchAll(/\bQ(\d+)\b/g)].map((m) => Number(m[1]));
+    const missingQ = firstMissingNumbers(qCount, presentQ).map((n) => `Q${n}`);
     add('小问 Q 编号连续', missingQ.length === 0, missingQ.length ? `缺少 ${missingQ.join('、')}` : `Q1–Q${qCount} 齐全`);
   }
 }
@@ -387,8 +433,6 @@ if (/(如图|图\s*\d|图[12]|表格|装置图|电路图)/.test(text)) {
 // 5. 高风险泄题词。解题模式只允许在“完整解答”标题之后出现答案。
 const risky = [];
 const lines = text.split(/\n/);
-const fullSolutionAt = text.search(/^#{0,3}\s*(?:完整解答|完整解析|解题过程|解答)\s*$/m);
-const isAfterFullSolution = (index) => solutionMode && fullSolutionAt >= 0 && index >= fullSolutionAt;
 for (let i = 0; i < lines.length; i++) {
   const line = lines[i];
   const index = lines.slice(0, i).reduce((n, l) => n + l.length + 1, 0);
@@ -424,16 +468,16 @@ if (/(符合|不符合)/.test(text) && !solutionMode) {
   if (choiceCtx && judgeLines.length) warn.push(`WARN 讲解模式出现“符合/不符合”：逐项判定可能变相泄题，应改为“触发什么知识点/验证什么”（${judgeLines.length} 行）`);
 }
 
-// 5.1 答案指纹反查：命中的答案词若出现在〇–六，提示可能泄题
-const answerLeaks = solutionMode ? [] : findAnswerLeaks(answerTerms);
-if (answerTerms.length && !solutionMode) {
+// 5.1 答案指纹反查：八模块都检查，只豁免独立完整解答区。
+const answerLeaks = findAnswerLeaks(answerTerms);
+if (answerTerms.length) {
   if (answerLeaks.length) {
     const msg =
-      `答案指纹出现在正文：${answerLeaks.length} 处，请确认是否泄题（允许出现在“七、审题收获”；课标行也需人工判断）\n  ` +
+      `答案指纹出现在正文：${answerLeaks.length} 处，请确认是否泄题（审题收获也不能写最终答案；课标行仍需人工判断）\n  ` +
         answerLeaks.slice(0, 8).map((x) => `第 ${x.line} 行（${x.section}）：${x.context}`).join('\n  ');
     if (strictAnswer) add('答案指纹隔离', false, msg); else warn.push(`WARN ${msg}`);
   } else {
-    ok.push('PASS 答案指纹未出现在〇–六正文');
+    ok.push('PASS 答案指纹未出现在八模块正文');
   }
 }
 
@@ -456,9 +500,6 @@ if (type === 'choice') {
   }
 }
 
-if (strictSemantic && !semanticReviewed) {
-  add('语义人工复核', false, '使用 --strict-semantic 时必须同时声明 --semantic-reviewed；自动闸门不能证明条件语义正确');
-}
 const structurePass = fail.length === 0;
 const result = {
   file,
