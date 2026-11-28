@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Pure Node package checks; --manifest also consults Git when .git is present.
 import { execFileSync } from 'node:child_process';
-import { lstatSync, readFileSync, readdirSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderBadge } from './make_badge.mjs';
@@ -80,7 +80,10 @@ export function releaseManifest(root) {
   if (hasGit) {
     // Git failures must fail closed; do not silently switch to copying local data.
     const top = execFileSync('git', ['-C', root, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
-    if (path.resolve(top) !== root) throw new Error('source must be the Git repository root');
+    // Git reports the physical path while `root` may arrive through a symlinked
+    // alias (macOS /var -> /private/var temp dirs). Compare realpaths; a broken
+    // or foreign Git root must still fail closed.
+    if (realpathSync(top) !== realpathSync(root)) throw new Error('source must be the Git repository root');
     files = execFileSync('git', ['-C', root, 'ls-files', '--cached', '-z'], { encoding: 'utf8' })
       .split('\0').filter(isReleaseSourcePath).sort();
   } else {
@@ -123,7 +126,15 @@ export function verifyPackage(root, expectedVersion) {
   return { ok: true, name: pkg.name, version, files: files.length };
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Compare realpaths: argv keeps a symlinked invoked path (macOS /tmp -> /private/tmp,
+// installed skill dirs behind links) while the loader resolves this module fully.
+function invokedAsMain() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch { return false; }
+}
+if (invokedAsMain()) {
   try {
     const args = process.argv.slice(2);
     if (args[0] === '--manifest' && args.length === 2) {

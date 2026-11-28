@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Pure, replay-validated training state. Only a trusted host supplies student/actor.
-import { pathToFileURL } from 'node:url';
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 export const CONDITION_TYPES = Object.freeze([
   'domain_range', 'figure_property', 'quantifier', 'term_definition',
@@ -274,7 +275,17 @@ export async function main(argv = process.argv.slice(2)) {
   process.stdout.write(`${JSON.stringify(output)}\n`);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Node resolves the main module through symlinks while process.argv keeps the
+// invoked path (macOS /tmp -> /private/tmp, /var -> /private/var, or an
+// installed skill directory behind a link). A raw compare silently skipped
+// main() and exited 0, so compare both realpaths instead.
+function invokedAsMain() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch { return false; }
+}
+if (invokedAsMain()) {
   main().catch(() => {
     // Never echo untrusted input, IDs, answers, filenames or JSON parser excerpts.
     process.stderr.write('training_state: invalid input or unauthorized transition\n');

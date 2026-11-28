@@ -9,6 +9,7 @@
 //   node scripts/make_badge.mjs release v2.1.0 dist/release.svg blue
 
 import { mkdir, writeFile } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -61,7 +62,17 @@ async function main() {
   console.log(`wrote ${path.relative(process.cwd(), path.resolve(out))}`);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Node resolves the main module through symlinks while process.argv keeps the
+// invoked path (macOS /tmp -> /private/tmp, /var -> /private/var, or an
+// installed skill directory behind a link). A raw compare silently skipped
+// main() and exited 0 without writing anything, so compare both realpaths.
+function invokedAsMain() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch { return false; }
+}
+if (invokedAsMain()) {
   main().catch((error) => {
     console.error(error.message);
     process.exit(1);

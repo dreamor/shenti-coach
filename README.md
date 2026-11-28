@@ -17,6 +17,10 @@
 - 讲题容易直接报答案——内置“不泄题”铁律与答案指纹闸门。
 - 题目需要一张结构图——内置 Mermaid + Chrome 的离线生图链路，零 npm 依赖。
 
+## v2.3.1：macOS 符号链接兼容修复
+
+Node 会把 ESM 主模块解析到真实路径，而 `process.argv[1]` 保留符号链接调用路径；macOS 临时目录（`/var` → `/private/var`）或安装在链接目录下的技能会命中这一差异，导致 CLI 入口守卫静默跳过、`releaseManifest` 误判 Git 根目录。本版将六个 CLI 守卫与 Git 根目录比较改为双向 realpath，测试临时目录先解析真实路径；功能契约不变，详见版本记录。
+
 ## v2.3.0：四项增强
 
 1. **默认短页，完整 audit 留存**：学生页只展示 30 秒速览、核心 C/H 链、收敛路径、陷阱与迁移；八模块、教材映射、B 卡与展开树仍完整保存在独立 `audit.md`，不是删减审计。教师审计不会自动作为学生附件发送。
@@ -59,7 +63,7 @@ shasum -a 256 -c skill.zip.sha256
 解压后也可离线自检（无需仓库或 npm 安装）：
 
 ```bash
-node shenti-coach/scripts/verify_package.mjs shenti-coach --version 2.3.0
+node shenti-coach/scripts/verify_package.mjs shenti-coach --version 2.3.1
 (cd shenti-coach && npm test)
 ```
 

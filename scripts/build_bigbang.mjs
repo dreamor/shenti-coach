@@ -5,6 +5,7 @@
 // 用法: node build_bigbang.mjs <spec.json> <out.html> [--mermaid-src <url>]
 
 import { readFile, writeFile } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
@@ -287,7 +288,15 @@ export function buildHtml(spec, options = {}) {
   return buildHtmlWithReport(spec, options).html;
 }
 
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+// Compare realpaths: argv keeps a symlinked invoked path (macOS /tmp -> /private/tmp,
+// /var -> /private/var, installed skill dirs behind links) while the loader
+// resolves this module to its real path; a raw compare silently skipped the CLI.
+const isMain = (() => {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch { return false; }
+})();
 if (isMain) {
   const [, , specPath, outPath, ...rest] = process.argv;
   if (!specPath || !outPath) {
