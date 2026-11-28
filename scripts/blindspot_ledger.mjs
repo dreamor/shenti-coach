@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Local-only anonymous ledger. Pure functions never store or transmit anything.
 import { lstat, open, link, rename, unlink } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import {
   CONDITION_TYPES, MAX_PAYLOAD_BYTES, assertFields, assertArray, assertId,
   assertStudentId, assertConditionType, readJsonInput,
@@ -250,7 +251,17 @@ export async function main(argv = process.argv.slice(2)) {
   process.stdout.write(`${JSON.stringify(result.view)}\n`);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Node resolves the main module through symlinks while process.argv keeps the
+// invoked path (macOS /tmp -> /private/tmp, /var -> /private/var, or an
+// installed skill directory behind a link). A raw compare silently skipped
+// main() and exited 0, so compare both realpaths instead.
+function invokedAsMain() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch { return false; }
+}
+if (invokedAsMain()) {
   main().catch(() => {
     process.stderr.write('blindspot_ledger: invalid input, unauthorized action or refused local save\n');
     process.exitCode = 1;

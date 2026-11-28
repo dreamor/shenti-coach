@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,7 +7,10 @@ import { fileURLToPath } from 'node:url';
 export const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 
 export function createTempDir(t) {
-  const dir = mkdtempSync(path.join(tmpdir(), 'shenti-test-'));
+  // macOS: os.tmpdir() lives under /var, which is a symlink to /private/var.
+  // Symlink-safe CLI guards (save-path ancestors, Git toplevel compare) must
+  // not fire on that OS alias, and fixtures must match realpath comparisons.
+  const dir = mkdtempSync(path.join(realpathSync(tmpdir()), 'shenti-test-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   return dir;
 }

@@ -338,6 +338,14 @@ export async function main(argv = process.argv.slice(2)) {
 }
 
 // Importing the pure functions never parses process.argv, writes files or exits the host.
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Compare realpaths: argv keeps a symlinked invoked path (macOS /tmp -> /private/tmp,
+// installed skill dirs behind links) while the loader resolves this module fully.
+function invokedAsMain() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch { return false; }
+}
+if (invokedAsMain()) {
   process.exitCode = await main();
 }

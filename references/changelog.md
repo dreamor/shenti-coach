@@ -1,5 +1,12 @@
 # 版本记录
 
+## 2.3.1 — 2026-11-28（macOS 符号链接兼容修复）
+
+- 修复 macOS 上 `npm test` 的 5 个环境性失败：`os.tmpdir()` 位于 `/var` → `/private/var` 符号链接下，触发账本保存的符号链接防护、Git 顶层目录原始路径比较与包测试暂存目录静默 no-op；测试临时目录先 `realpathSync` 解析。
+- 六个 CLI（`make_badge`、`verify_package`、`present_output`、`build_bigbang`、`blindspot_ledger`、`training_state`）的入口守卫改为双向 realpath 比较：技能目录本身位于符号链接路径（macOS /tmp、/var 别名或安装链接）时不再静默退出 0 不执行。
+- `releaseManifest` 与 `git rev-parse --show-toplevel` 的比较改为 realpath 双向解析，保持"非仓库根目录即闭锁失败"的语义不变。
+- 新增 `scripts/tests/symlink-entry.test.mjs`：经符号链接目录别名调用 CLI 与解析 Git 清单的回归覆盖。
+
 ## 2.3 — 2026-11-27（v2.3.0：自适应学习与可信发布）
 
 - **默认短页、完整 audit**：学生页突出 30 秒速览、核心 C/H 链、收敛路径、陷阱与迁移；完整八模块、教材映射、B 卡与文本树独立保留，不删审计、不自动发送教师附件。
